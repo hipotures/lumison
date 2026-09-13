@@ -32,6 +32,20 @@ export {
 export { adaptiveTick, createAdaptive, createPerf, perfTick } from './perf.js';
 export { advanceClocks, CLOCK_NAMES, createClocks } from './clocks.js';
 export {
+  advanceMotionWarp,
+  configureMotionWarp,
+  createMotionWarpState,
+  MOTION_WARP_CALIBRATION,
+  MOTION_WARP_DEFAULTS,
+  MOTION_WARP_LIMITS,
+  motionDriveForSpeed,
+  motionWarpConfiguration,
+  motionWarpDisplacementAt,
+  motionWarpRenderState,
+  restoreMotionWarpRuntime,
+  snapshotMotionWarpRuntime,
+} from './motion-warp.js';
+export {
   advanceInfluenceDynamics,
   canonicalInfluenceToFixed,
   createSpatialInfluence,

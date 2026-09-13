@@ -10,6 +10,7 @@ import { formatNum } from './util.js';
 const GROUPS = [
   ['preset', 'Material Preset'],
   ['sim', 'Film Simulation'],
+  ['interaction', 'Experimental Interaction'],
   ['opt', 'Optics'],
   ['lit', 'Lighting'],
   ['ren', 'Rendering'],
@@ -112,6 +113,27 @@ export function buildUI(root, state, labState, A) {
     host.append(ctl);
     sliders[name] = { input, output: out, lock, step };
   }
+
+  // ---- optional source-neutral motion response ----
+  const interaction = sections.interaction;
+  const initialMotionWarp = A.motionWarpConfiguration();
+  interaction.append(toggleRow(
+    'Passive Warp',
+    initialMotionWarp.enabled,
+    (enabled) => A.motionWarp({ enabled }),
+  ));
+  const passiveGain = rangeRow(
+    'Passive Strength', 0, 2, 0.05, initialMotionWarp.gain,
+    (gain) => A.motionWarp({ gain }),
+  );
+  const passiveRadius = rangeRow(
+    'Passive Radius', 0.03, 0.5, 0.01, initialMotionWarp.radius,
+    (radius) => A.motionWarp({ radius }),
+  );
+  interaction.append(passiveGain.root, passiveRadius.root);
+  interaction.append(hint(
+    'Optional GPU domain displacement from motion. Off preserves the Fixed hover baseline; Canvas2D cannot reproduce this structural effect.',
+  ));
 
   // ---- rendering extras ----
   const rsec = sections.ren;
@@ -233,6 +255,13 @@ export function buildUI(root, state, labState, A) {
     if (d) d.value = state.diag;
     const aq = root.querySelector('input[aria-label="Adaptive quality"]');
     if (aq) aq.checked = state.adaptive;
+    const motionWarp = A.motionWarpConfiguration();
+    const passive = root.querySelector('input[aria-label="Passive Warp"]');
+    if (passive) passive.checked = motionWarp.enabled;
+    passiveGain.input.value = String(motionWarp.gain);
+    passiveGain.output.textContent = formatNum(motionWarp.gain, 0.05);
+    passiveRadius.input.value = String(motionWarp.radius);
+    passiveRadius.output.textContent = formatNum(motionWarp.radius, 0.01);
     const pr = root.querySelector('input[aria-label="Surface probe"]');
     if (pr) pr.checked = labState.probe;
     pauseBtn.textContent = state.paused ? '▶' : '⏸';
@@ -293,4 +322,26 @@ function toggleRow(label, initial, onChange) {
   input.addEventListener('change', () => onChange(input.checked));
   row.append(lab, sw);
   return row;
+}
+
+function rangeRow(label, minimum, maximum, step, initial, onInput) {
+  const root = el('div', 'ctl interaction-ctl');
+  const lab = document.createElement('label');
+  lab.textContent = label;
+  const output = document.createElement('output');
+  output.textContent = formatNum(initial, step);
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = String(minimum);
+  input.max = String(maximum);
+  input.step = String(step);
+  input.value = String(initial);
+  input.setAttribute('aria-label', label);
+  input.addEventListener('input', () => {
+    const value = Number(input.value);
+    onInput(value);
+    output.textContent = formatNum(value, step);
+  });
+  root.append(lab, output, input);
+  return { root, input, output };
 }

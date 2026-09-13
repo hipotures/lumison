@@ -42,7 +42,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
       }
     },
 
-    render({ state, influence, renderScale }) {
+    render({ state, influence, motionWarp, renderScale }) {
       const aspect = logicalAspect();
       const fixedInfluence = canonicalInfluenceToFixed(influence, aspect);
       try {
@@ -55,6 +55,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
             bufW: fit.bufW,
             bufH: fit.bufH,
             pointer: canonicalInfluenceToFixed(influence, fittedAspect),
+            motionWarp,
           });
           host.renderer.render(host.stage.scene, host.stage.camera);
           return { aspect: fittedAspect };
@@ -94,6 +95,9 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
         bufferHeight: ratio === null ? null : Math.round((canvas.clientHeight || 1) * ratio),
         ratio,
         stats: rendererStats(host.renderer),
+        capabilities: {
+          motionWarp: Boolean(host.renderer && host.stage),
+        },
       };
     },
 

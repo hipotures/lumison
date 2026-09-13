@@ -119,6 +119,10 @@ export function createFilmMaterial(qualityName) {
     uRes: uniform(new Vector2(1, 1)),
     uPointer: uniform(new Vector4(0.5, 0.5, 0.0, 0.16)),
     uPointerVel: uniform(new Vector2(0, 0)),
+    // Canonical position/radius plus a separately integrated displacement.
+    // W gates the optional response; zero is the exact Fixed-compatible path.
+    uMotionWarp: uniform(new Vector4(0, 0, 0.19, 0)),
+    uMotionWarpVector: uniform(new Vector2(0, 0)),
     uMode: uniform(0),
     uFlowSpeed: uniform(1), uFlowScale: uniform(1.3),
     uTurb: uniform(1), uWarp: uniform(1.1), uVort: uniform(1),
@@ -194,7 +198,17 @@ export function createFilmMaterial(qualityName) {
 
   const graph = Fn(() => {
     const fullUv = uv();
-    const st = vec2(fullUv.x.mul(U.uAspect), fullUv.y).sub(vec2(U.uAspect.mul(0.5), 0.5)).mul(2.0);
+    const fixedSt = vec2(fullUv.x.mul(U.uAspect), fullUv.y)
+      .sub(vec2(U.uAspect.mul(0.5), 0.5)).mul(2.0);
+    // Qwen-inspired passive motion warp, translated to canonical surface
+    // units. It displaces the domain before Fixed flow, vortices, nested warp
+    // and thickness structure, so landmarks move coherently. No thickness,
+    // normal, lighting or optical response is added here.
+    const motionDelta = fixedSt.mul(0.5).sub(U.uMotionWarp.xy);
+    const motionRadius2 = max(U.uMotionWarp.z.mul(U.uMotionWarp.z), 0.0009);
+    const motionEnvelope = exp(motionDelta.dot(motionDelta).div(motionRadius2).negate())
+      .mul(U.uMotionWarp.w);
+    const st = fixedSt.add(U.uMotionWarpVector.mul(motionEnvelope.mul(2.0)));
 
     const pack0 = advected(st);
     // Pointer push: velocity advects coordinates near the cursor.
@@ -360,6 +374,19 @@ export function updateUniforms(U, s, env) {
   U.uRes.value.set(env.width, env.height);
   U.uPointer.value.set(env.pointer.x, env.pointer.y, env.pointer.strength, 0.16);
   U.uPointerVel.value.set(env.pointer.vx, env.pointer.vy);
+  const motionWarp = env.motionWarp;
+  const motionEnabled = motionWarp?.enabled === true
+    && motionWarp.effectiveStrength > 0;
+  U.uMotionWarp.value.set(
+    motionWarp?.position?.x ?? 0,
+    motionWarp?.position?.y ?? 0,
+    motionWarp?.radius ?? 0.19,
+    motionEnabled ? 1 : 0,
+  );
+  U.uMotionWarpVector.value.set(
+    motionEnabled ? motionWarp.displacement.x : 0,
+    motionEnabled ? motionWarp.displacement.y : 0,
+  );
   U.uMode.value = env.mode;
   U.uFlowSpeed.value = s.flowSpeed;
   U.uFlowScale.value = s.flowScale;

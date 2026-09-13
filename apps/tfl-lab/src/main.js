@@ -181,6 +181,7 @@ async function boot() {
         ? `calls    ${statistics.calls}  tris ${statistics.triangles ?? '—'}`
         : null,
       `input    pos <b>${diagnostic.influence.position.x.toFixed(3)}, ${diagnostic.influence.position.y.toFixed(3)}</b>  vel <b>${diagnostic.influence.velocity.x.toFixed(2)}, ${diagnostic.influence.velocity.y.toFixed(2)}</b>  strength <b>${diagnostic.influence.strength.toFixed(2)}</b>`,
+      `warp     <b>${diagnostic.motionWarp.enabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.motionWarp.gain.toFixed(2)}</b>  radius <b>${diagnostic.motionWarp.radius.toFixed(2)}</b>  effect <b>${diagnostic.motionWarp.effectiveStrength.toFixed(4)} su</b>${diagnostic.capabilities?.motionWarp === false ? '  (GPU unavailable)' : ''}`,
       `clocks   animation ${diagnostic.clocks.animation.toFixed(2)}  flow ${diagnostic.clocks.flow.toFixed(2)}  light ${diagnostic.clocks.lighting.toFixed(2)}  events ${diagnostic.clocks.events.toFixed(2)}`,
       `events   ${diagnostic.transientEventCount}/${diagnostic.transientCapacity}  locks ${diagnostic.lockCount}  tx ${diagnostic.lastTransaction.accepted}/${diagnostic.lastTransaction.skipped}/${diagnostic.lastTransaction.rejected}`,
       `mode     ${state.diag}${state.paused ? '  ·  PAUSED' : ''}`,
@@ -196,6 +197,12 @@ async function boot() {
     },
     lockParam: (name, locked) => {
       if (engine.setParameterLock(name, locked)) { app.ui?.sync(); persistSoon(); }
+    },
+    motionWarpConfiguration: () => engine.getMotionWarpConfiguration(),
+    motionWarp: (changes) => {
+      const report = engine.setMotionWarp(changes);
+      if (report.changed) { app.ui?.sync(); persistSoon(); }
+      return report;
     },
     preset: (name) => {
       if (engine.applyPreset(name).ok) { app.ui?.sync(); persistSoon(); }

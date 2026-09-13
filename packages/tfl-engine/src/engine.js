@@ -2,6 +2,15 @@
 // adapter, while parameters, clocks, influences, events and replay state stay
 // independent of DOM and browser input semantics.
 import { advanceClocks } from './clocks.js';
+import {
+  advanceMotionWarp,
+  configureMotionWarp,
+  createMotionWarpState,
+  motionWarpConfiguration,
+  motionWarpRenderState,
+  restoreMotionWarpRuntime,
+  snapshotMotionWarpRuntime,
+} from './motion-warp.js';
 import { adaptiveTick, createAdaptive, createPerf, perfTick } from './perf.js';
 import { applyPreset, mutate, randomize, resetParameters } from './presets.js';
 import { sampleSurface } from './probe.js';
@@ -51,6 +60,7 @@ export class TflEngine {
     this.effectiveQuality = state.quality;
     this.adaptiveScale = state.requested.renderScale;
     this.influence = createSpatialInfluence();
+    this.motionWarp = createMotionWarpState();
     this.events = createTransientStore(eventCapacity);
     this.viewport = { aspect: 1 };
     this.lastProbeTime = -Infinity;
@@ -144,6 +154,7 @@ export class TflEngine {
     this.adaptiveScale = this.state.target.renderScale;
     this.adaptive = createAdaptive();
     this.influence = createSpatialInfluence();
+    this.motionWarp = createMotionWarpState();
     this.events = createTransientStore(this.events.capacity);
     this.#rebuildQuality();
     return report;
@@ -215,6 +226,14 @@ export class TflEngine {
     });
   }
 
+  setMotionWarp(changes) {
+    return configureMotionWarp(this.motionWarp, changes);
+  }
+
+  getMotionWarpConfiguration() {
+    return motionWarpConfiguration(this.motionWarp);
+  }
+
   emitTransientEvent(event) {
     return addTransientEvent(this.events, event);
   }
@@ -228,6 +247,9 @@ export class TflEngine {
     smoothState(this.state, dt);
     advanceClocks(this.state.clocks, dt, this.state.current, { paused: this.state.paused });
     advanceTransientStore(this.events, dt, { paused: this.state.paused });
+    // Continuous response follows explicit application dt even while the
+    // animation clocks are paused, matching Fixed's influence-release policy.
+    advanceMotionWarp(this.motionWarp, this.influence, dt);
     perfTick(this.perf, dt * 1000);
     const scale = this.state.adaptive
       ? this.adaptiveScale
@@ -261,6 +283,7 @@ export class TflEngine {
     const result = this.renderHost.render({
       state: this.state,
       influence: this.influence,
+      motionWarp: motionWarpRenderState(this.motionWarp),
       renderScale: this.state.effective.renderScale,
     });
     if (result?.aspect) this.viewport.aspect = normalizeAspect(result.aspect);
@@ -274,12 +297,16 @@ export class TflEngine {
 
   createSnapshot({ includeRuntime = false } = {}) {
     const saved = createSnapshot(this.state, { includeRuntime });
+    saved.interactions = {
+      motionWarp: motionWarpConfiguration(this.motionWarp),
+    };
     if (includeRuntime) {
       saved.runtime.influence = cloneInfluence(this.influence);
       saved.runtime.transients = snapshotTransientStore(this.events);
       saved.runtime.viewport = { ...this.viewport };
       saved.runtime.effectiveQuality = this.effectiveQuality;
       saved.runtime.adaptiveScale = this.adaptiveScale;
+      saved.runtime.motionWarp = snapshotMotionWarpRuntime(this.motionWarp);
     }
     return saved;
   }
@@ -287,6 +314,15 @@ export class TflEngine {
   restoreSnapshot(saved, options = {}) {
     let restoredEvents = null;
     let restoredInfluence = null;
+    let restoredMotionWarp = null;
+    const savedMotionWarp = saved?.interactions?.motionWarp;
+    if (savedMotionWarp !== undefined) {
+      restoredMotionWarp = createMotionWarpState();
+      const motionReport = configureMotionWarp(restoredMotionWarp, savedMotionWarp);
+      if (!motionReport.ok || motionReport.accepted.length !== 3) {
+        return { ok: false, reason: 'invalid-motion-warp-configuration' };
+      }
+    }
     if (options.restoreRuntime) {
       restoredInfluence = sanitizeSpatialInfluence(saved?.runtime?.influence);
       restoredEvents = restoreTransientStore(saved?.runtime?.transients);
@@ -299,6 +335,14 @@ export class TflEngine {
           && adaptiveScale <= PARAM_DEFS.renderScale[1])
         || !QUALITY_LEVELS.includes(saved.runtime?.effectiveQuality)) {
         return { ok: false, reason: 'invalid-engine-runtime' };
+      }
+      if (saved?.runtime?.motionWarp !== undefined) {
+        const target = restoredMotionWarp
+          ?? createMotionWarpState(motionWarpConfiguration(this.motionWarp));
+        if (!restoreMotionWarpRuntime(target, saved.runtime.motionWarp)) {
+          return { ok: false, reason: 'invalid-motion-warp-runtime' };
+        }
+        restoredMotionWarp = target;
       }
     }
     const result = applySnapshot(this.state, saved, options);
@@ -320,6 +364,7 @@ export class TflEngine {
       if (restoredEvents) this.events = restoredEvents;
       this.viewport.aspect = normalizeAspect(saved.runtime?.viewport?.aspect);
     }
+    if (restoredMotionWarp) this.motionWarp = restoredMotionWarp;
     this.#rebuildQuality();
     return result;
   }
@@ -370,6 +415,7 @@ export class TflEngine {
       adaptiveAction: this.adaptive.lastAction,
       clocks: { ...this.state.clocks },
       influence: cloneInfluence(this.influence),
+      motionWarp: motionWarpRenderState(this.motionWarp),
       transientEventCount: activeTransientCount(this.events),
       transientCapacity: this.events.capacity,
       lockCount: Object.keys(this.state.locks).length,
