@@ -1,9 +1,15 @@
 // TFL Lab shell for the Fixed compatibility baseline. Browser input, UI,
 // persistence and presentation stay here; rendering and visual state use the
 // TFL Engine facade.
-import { createState, DIAG_MODES, TflEngine } from '../../../packages/tfl-engine/src/index.js';
+import {
+  createRippleDisplacementEvent,
+  createState,
+  DIAG_MODES,
+  TflEngine,
+} from '../../../packages/tfl-engine/src/index.js';
 import { createBrowserRenderHost } from '../../../packages/tfl-engine/src/browser.js';
 import { createPointerAdapter } from './input.js';
+import { createRippleTriggerPolicy } from './ripple-trigger.js';
 import { buildUI } from './ui.js';
 import { copyText, downloadBlob, toast, toggleFullscreen } from './util.js';
 import {
@@ -80,6 +86,7 @@ async function boot() {
     diagnosticTimer: 0,
     probeTimer: 0,
     persistTimer: 0,
+    rippleTriggers: null,
   };
 
   const renderHost = createBrowserRenderHost({ canvas, fallbackCanvas });
@@ -105,6 +112,10 @@ async function boot() {
   if (!saved || !applyLabSnapshot(engine, labState, saved)) {
     engine.applyPreset('Soap Film', { transition: 'immediate' });
   }
+  app.rippleTriggers = createRippleTriggerPolicy({
+    clickEnabled: labState.rippleOnClick,
+    dragEnabled: labState.rippleDuringDrag,
+  });
 
   const persistSoon = () => {
     clearTimeout(app.persistTimer);
@@ -186,6 +197,7 @@ async function boot() {
       `press    <b>${diagnostic.activeDeformation.pressEnabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.activeDeformation.pressGain.toFixed(2)}</b>  effect <b>${diagnostic.activeDeformation.pressDisplacement.toFixed(4)} su</b>`,
       `drag     <b>${diagnostic.activeDeformation.dragEnabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.activeDeformation.dragGain.toFixed(2)}</b>  vector <b>${diagnostic.activeDeformation.dragDisplacement.x.toFixed(4)}, ${diagnostic.activeDeformation.dragDisplacement.y.toFixed(4)} su</b>${diagnostic.capabilities?.activeDeformation === false ? '  (GPU unavailable)' : ''}`,
       `shear    <b>${diagnostic.coordinateShear.enabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.coordinateShear.gain.toFixed(2)}</b>  speed <b>${diagnostic.coordinateShear.sourceSpeed.toFixed(2)} su/s</b>  vector <b>${diagnostic.coordinateShear.displacement.x.toFixed(4)}, ${diagnostic.coordinateShear.displacement.y.toFixed(4)} su</b>${diagnostic.capabilities?.coordinateShear === false ? '  (GPU unavailable)' : ''}`,
+      `ripple   <b>${diagnostic.rippleDisplacement.enabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.rippleDisplacement.gain.toFixed(2)}</b>  active <b>${diagnostic.rippleDisplacement.activeEventCount}/${diagnostic.rippleDisplacement.capacity}</b>${diagnostic.capabilities?.rippleDisplacement === false ? '  (GPU unavailable)' : ''}`,
       `clocks   animation ${diagnostic.clocks.animation.toFixed(2)}  flow ${diagnostic.clocks.flow.toFixed(2)}  light ${diagnostic.clocks.lighting.toFixed(2)}  events ${diagnostic.clocks.events.toFixed(2)}`,
       `events   ${diagnostic.transientEventCount}/${diagnostic.transientCapacity}  locks ${diagnostic.lockCount}  tx ${diagnostic.lastTransaction.accepted}/${diagnostic.lastTransaction.skipped}/${diagnostic.lastTransaction.rejected}`,
       `mode     ${state.diag}${state.paused ? '  ·  PAUSED' : ''}`,
@@ -220,6 +232,22 @@ async function boot() {
       if (report.changed) { app.ui?.sync(); persistSoon(); }
       return report;
     },
+    rippleDisplacementConfiguration: () => engine.getRippleDisplacementConfiguration(),
+    rippleDisplacement: (changes) => {
+      const report = engine.setRippleDisplacement(changes);
+      if (report.changed) { app.ui?.sync(); persistSoon(); }
+      return report;
+    },
+    rippleOnClick: (enabled) => {
+      labState.rippleOnClick = enabled === true;
+      app.rippleTriggers.configure({ clickEnabled: labState.rippleOnClick });
+      persistSoon();
+    },
+    rippleDuringDrag: (enabled) => {
+      labState.rippleDuringDrag = enabled === true;
+      app.rippleTriggers.configure({ dragEnabled: labState.rippleDuringDrag });
+      persistSoon();
+    },
     fixedInteractionBaseline: () => {
       const passive = engine.setMotionWarp({ enabled: false });
       const active = engine.setActiveDeformation({
@@ -228,7 +256,8 @@ async function boot() {
         dragEnabled: false,
       });
       const shear = engine.setCoordinateShear({ enabled: false });
-      if (passive.changed || active.changed || shear.changed) {
+      const ripple = engine.setRippleDisplacement({ enabled: false });
+      if (passive.changed || active.changed || shear.changed || ripple.changed) {
         app.ui?.sync();
         persistSoon();
       }
@@ -250,6 +279,10 @@ async function boot() {
       clearLabState();
       engine.factoryReset();
       resetLabUiState(labState);
+      app.rippleTriggers.configure({
+        clickEnabled: labState.rippleOnClick,
+        dragEnabled: labState.rippleDuringDrag,
+      });
       applyPanelVisibility();
       app.ui?.sync();
       saveLabState(engine, labState);
@@ -318,6 +351,10 @@ async function boot() {
     try {
       const parsed = JSON.parse(text.value);
       if (applyLabSnapshot(engine, labState, parsed, { preserveLocks: true })) {
+        app.rippleTriggers.configure({
+          clickEnabled: labState.rippleOnClick,
+          dragEnabled: labState.rippleDuringDrag,
+        });
         applyPanelVisibility();
         app.ui?.sync();
         saveLabState(engine, labState);
@@ -336,15 +373,29 @@ async function boot() {
     engine.setViewport({ aspect: app.pointer.aspect });
     engine.setSpatialInfluence(app.pointer.influence);
   };
+  const emitRippleOrigins = (origins) => {
+    if (!engine.getRippleDisplacementConfiguration().enabled) return;
+    for (const origin of origins) {
+      engine.emitTransientEvent(createRippleDisplacementEvent({ origin }));
+    }
+  };
   for (const target of [canvas, fallbackCanvas]) {
     target.addEventListener('pointermove', () => {
       submitInfluence();
+      if (app.pointer.influence.engaged) {
+        emitRippleOrigins(app.rippleTriggers.move(app.pointer.influence.position));
+      }
       if (labState.probe) updateProbe(false);
     });
     target.addEventListener('pointerdown', () => {
       submitInfluence();
+      if (app.pointer.influence.engaged) {
+        emitRippleOrigins(app.rippleTriggers.begin(app.pointer.influence.position));
+      }
       if (labState.probe) updateProbe(true);
     });
+    target.addEventListener('pointerup', () => app.rippleTriggers.end());
+    target.addEventListener('pointercancel', () => app.rippleTriggers.end());
   }
 
   window.addEventListener('keydown', (event) => {

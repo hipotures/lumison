@@ -5,6 +5,8 @@ export function createLabState() {
     probe: false,
     panelOpen: true,
     panelCollapsed: {},
+    rippleOnClick: true,
+    rippleDuringDrag: false,
   };
 }
 
@@ -13,6 +15,8 @@ export function snapshotLab(engine, labState) {
     ...engine.createSnapshot(),
     probe: labState.probe,
     panelOpen: labState.panelOpen,
+    rippleOnClick: labState.rippleOnClick,
+    rippleDuringDrag: labState.rippleDuringDrag,
   };
 }
 
@@ -21,6 +25,10 @@ export function applyLabSnapshot(engine, labState, saved, options = {}) {
   if (!result.ok) return false;
   labState.probe = saved.probe === true;
   if (typeof saved.panelOpen === 'boolean') labState.panelOpen = saved.panelOpen;
+  if (typeof saved.rippleOnClick === 'boolean') labState.rippleOnClick = saved.rippleOnClick;
+  if (typeof saved.rippleDuringDrag === 'boolean') {
+    labState.rippleDuringDrag = saved.rippleDuringDrag;
+  }
   return true;
 }
 
@@ -49,4 +57,6 @@ export function resetLabUiState(labState) {
   labState.probe = false;
   labState.panelOpen = true;
   labState.panelCollapsed = {};
+  labState.rippleOnClick = true;
+  labState.rippleDuringDrag = false;
 }

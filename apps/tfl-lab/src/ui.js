@@ -119,6 +119,7 @@ export function buildUI(root, state, labState, A) {
   const initialMotionWarp = A.motionWarpConfiguration();
   const initialActiveDeformation = A.activeDeformationConfiguration();
   const initialCoordinateShear = A.coordinateShearConfiguration();
+  const initialRippleDisplacement = A.rippleDisplacementConfiguration();
   const baselineButton = el('button', 'btn small', 'Fixed baseline');
   baselineButton.addEventListener('click', () => A.fixedInteractionBaseline());
   const baselineRow = el('div', 'btn-row');
@@ -180,8 +181,28 @@ export function buildUI(root, state, labState, A) {
     (gain) => A.coordinateShear({ gain }),
   );
   interaction.append(coordinateShearGain.root);
+  interaction.append(toggleRow(
+    'Ripple Displacement',
+    initialRippleDisplacement.enabled,
+    (enabled) => A.rippleDisplacement({ enabled }),
+  ));
+  const rippleGain = rangeRow(
+    'Ripple Gain', 0, 2, 0.05, initialRippleDisplacement.gain,
+    (gain) => A.rippleDisplacement({ gain }),
+  );
+  interaction.append(rippleGain.root);
+  interaction.append(toggleRow(
+    'Ripple on Click',
+    labState.rippleOnClick,
+    (enabled) => A.rippleOnClick(enabled),
+  ));
+  interaction.append(toggleRow(
+    'Ripples During Drag',
+    labState.rippleDuringDrag,
+    (enabled) => A.rippleDuringDrag(enabled),
+  ));
   interaction.append(hint(
-    'Press, Drag and Coordinate Shear alter structural coordinates only while the influence is active. Coordinate Shear reuses Active Radius. The legacy toggle includes Fixed\'s scalar thickness shear; disable it to compare the true coordinate transform alone.',
+    'Press, Drag, Coordinate Shear and Ripple Displacement alter structural coordinates. Timed ripples stay at their event origins; drag events use a fixed 0.075 surface-unit spacing. The legacy toggle includes Fixed\'s scalar thickness shear.',
   ));
 
   // ---- rendering extras ----
@@ -329,6 +350,15 @@ export function buildUI(root, state, labState, A) {
     if (shear) shear.checked = coordinateShear.enabled;
     coordinateShearGain.input.value = String(coordinateShear.gain);
     coordinateShearGain.output.textContent = formatNum(coordinateShear.gain, 0.05);
+    const rippleDisplacement = A.rippleDisplacementConfiguration();
+    const ripple = root.querySelector('input[aria-label="Ripple Displacement"]');
+    if (ripple) ripple.checked = rippleDisplacement.enabled;
+    rippleGain.input.value = String(rippleDisplacement.gain);
+    rippleGain.output.textContent = formatNum(rippleDisplacement.gain, 0.05);
+    const rippleOnClick = root.querySelector('input[aria-label="Ripple on Click"]');
+    if (rippleOnClick) rippleOnClick.checked = labState.rippleOnClick;
+    const ripplesDuringDrag = root.querySelector('input[aria-label="Ripples During Drag"]');
+    if (ripplesDuringDrag) ripplesDuringDrag.checked = labState.rippleDuringDrag;
     const pr = root.querySelector('input[aria-label="Surface probe"]');
     if (pr) pr.checked = labState.probe;
     pauseBtn.textContent = state.paused ? '▶' : '⏸';

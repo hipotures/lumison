@@ -1,4 +1,5 @@
-export const DEFAULT_TRANSIENT_CAPACITY = 16;
+export const MAX_TRANSIENT_CAPACITY = 16;
+export const DEFAULT_TRANSIENT_CAPACITY = MAX_TRANSIENT_CAPACITY;
 
 function inactiveEntry(index) {
   return {
@@ -11,11 +12,15 @@ function inactiveEntry(index) {
     strength: 0,
     age: 0,
     lifetime: 0,
+    parameters: {},
   };
 }
 
 export function createTransientStore(capacity = DEFAULT_TRANSIENT_CAPACITY) {
-  const size = Number.isInteger(capacity) && capacity > 0 ? capacity : DEFAULT_TRANSIENT_CAPACITY;
+  const requested = Number.isInteger(capacity) && capacity > 0
+    ? capacity
+    : DEFAULT_TRANSIENT_CAPACITY;
+  const size = Math.min(requested, MAX_TRANSIENT_CAPACITY);
   return {
     capacity: size,
     nextSequence: 0,
@@ -39,7 +44,11 @@ export function addTransientEvent(store, event) {
       if (candidate.sequence < selected.sequence
         || (candidate.sequence === selected.sequence && index < slot)) slot = index;
     }
-    evicted = { ...store.entries[slot], position: { ...store.entries[slot].position } };
+    evicted = {
+      ...store.entries[slot],
+      position: { ...store.entries[slot].position },
+      parameters: { ...store.entries[slot].parameters },
+    };
   }
 
   const value = validation.value;
@@ -54,6 +63,7 @@ export function addTransientEvent(store, event) {
     strength: value.strength,
     age: 0,
     lifetime: value.lifetime,
+    parameters: { ...value.parameters },
   };
   return { accepted: true, reason: null, slot, sequence, evicted };
 }
@@ -80,12 +90,14 @@ export function snapshotTransientStore(store) {
     entries: store.entries.map((entry) => ({
       ...entry,
       position: { ...entry.position },
+      parameters: { ...entry.parameters },
     })),
   };
 }
 
 export function restoreTransientStore(saved) {
   if (!saved || !Number.isInteger(saved.capacity) || saved.capacity <= 0
+    || saved.capacity > MAX_TRANSIENT_CAPACITY
     || !Number.isSafeInteger(saved.nextSequence) || saved.nextSequence < 0
     || !Array.isArray(saved.entries) || saved.entries.length !== saved.capacity) return null;
   const store = createTransientStore(saved.capacity);
@@ -109,6 +121,7 @@ export function restoreTransientStore(saved) {
       strength: validation.value.strength,
       age: entry.age,
       lifetime: validation.value.lifetime,
+      parameters: { ...validation.value.parameters },
     };
   }
   if (store.nextSequence <= maximumSequence) return null;
@@ -124,6 +137,16 @@ function validateEvent(event) {
   if (event.radius < 0 || event.strength < 0 || event.lifetime <= 0) {
     return { ok: false, reason: 'event-radius-strength-and-lifetime-out-of-range' };
   }
+  const parameters = event.parameters ?? {};
+  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) {
+    return { ok: false, reason: 'event-parameters-must-be-an-object' };
+  }
+  const parameterEntries = Object.entries(parameters);
+  if (parameterEntries.length > 16
+    || parameterEntries.some(([name, value]) => !name
+      || typeof value !== 'number' || !Number.isFinite(value))) {
+    return { ok: false, reason: 'event-parameters-must-be-finite-numbers' };
+  }
   return {
     ok: true,
     value: {
@@ -132,6 +155,7 @@ function validateEvent(event) {
       radius: event.radius,
       strength: event.strength,
       lifetime: event.lifetime,
+      parameters: Object.fromEntries(parameterEntries),
     },
   };
 }

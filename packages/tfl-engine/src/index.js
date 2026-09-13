@@ -90,9 +90,27 @@ export {
   advanceTransientStore,
   createTransientStore,
   DEFAULT_TRANSIENT_CAPACITY,
+  MAX_TRANSIENT_CAPACITY,
   restoreTransientStore,
   snapshotTransientStore,
 } from './transients.js';
+export {
+  configureRippleDisplacement,
+  createRippleDisplacementEvent,
+  createRippleDisplacementState,
+  RIPPLE_DISPLACEMENT_CALIBRATION,
+  RIPPLE_DISPLACEMENT_CAPACITY,
+  RIPPLE_DISPLACEMENT_DEFAULTS,
+  RIPPLE_DISPLACEMENT_EVENT_TYPE,
+  RIPPLE_DISPLACEMENT_LIMITS,
+  RIPPLE_EVENT_DEFAULTS,
+  RIPPLE_EVENT_LIMITS,
+  rippleDisplacementAt,
+  rippleDisplacementConfiguration,
+  rippleDisplacementRenderState,
+  rippleEventDisplacementAt,
+  validateRippleDisplacementEvent,
+} from './ripple-displacement.js';
 export {
   DEFAULT_MUTATION_SEED,
   DEFAULT_VISUAL_SEED,

@@ -19,6 +19,11 @@ import {
   fract, floor, sin, cos, exp, sqrt, abs, min, max,
   mix, clamp, smoothstep, pow, normalize, If,
 } from 'three/tsl';
+import {
+  RIPPLE_DISPLACEMENT_CALIBRATION,
+  RIPPLE_DISPLACEMENT_CAPACITY,
+  RIPPLE_EVENT_DEFAULTS,
+} from './ripple-displacement.js';
 
 export const QUALITY_SPEC = {
   Low:    { oct: 3, spec: 5,  central: false, micro: 0, fineOct: 0 },
@@ -131,6 +136,24 @@ export function createFilmMaterial(qualityName) {
     // off-diagonal coordinate shear. A zero vector preserves Phase 3B.
     uCoordinateShear: uniform(new Vector4(0, 0, 0.19, 0)),
     uCoordinateShearVector: uniform(new Vector2(0, 0)),
+    // One pair of uniforms per slot in the Phase 2 bounded transient store.
+    // Event: origin x/y, age, effective displacement. Parameters: wavelength,
+    // propagation speed, front width, lifetime. Arrays and graph loop share
+    // RIPPLE_DISPLACEMENT_CAPACITY exactly.
+    uRippleEvents: Array.from(
+      { length: RIPPLE_DISPLACEMENT_CAPACITY },
+      () => uniform(new Vector4(0, 0, 0, 0)),
+    ),
+    uRippleParameters: Array.from(
+      { length: RIPPLE_DISPLACEMENT_CAPACITY },
+      () => uniform(new Vector4(
+        RIPPLE_EVENT_DEFAULTS.wavelength,
+        RIPPLE_EVENT_DEFAULTS.propagationSpeed,
+        RIPPLE_EVENT_DEFAULTS.width,
+        1,
+      )),
+    ),
+    uRippleEnabled: uniform(0),
     uMode: uniform(0),
     uFlowSpeed: uniform(1), uFlowScale: uniform(1.3),
     uTurb: uniform(1), uWarp: uniform(1.1), uVort: uniform(1),
@@ -254,7 +277,41 @@ export function createFilmMaterial(qualityName) {
       U.uCoordinateShearVector.x.mul(shearCross.x),
       U.uCoordinateShearVector.y.mul(shearCross.y),
     ).negate().mul(shearEnvelope.mul(2.0));
-    const structuralSt = st.add(activeOffset).add(shearOffset);
+    // Timed ripple displacement uses each event's immutable canonical origin
+    // and explicit age. A localized oscillating front moves sample coordinates
+    // radially before every structural stage; it adds no thickness or glow.
+    const rippleOffset = vec2(0.0, 0.0).toVar();
+    // A uniform branch prevents the 16-event wave math from affecting the
+    // accepted baseline render cost while the optional mechanism is off.
+    If(U.uRippleEnabled.greaterThan(0.0), () => {
+      for (let index = 0; index < RIPPLE_DISPLACEMENT_CAPACITY; index++) {
+        const event = U.uRippleEvents[index];
+        const parameters = U.uRippleParameters[index];
+        If(event.w.greaterThan(0.0), () => {
+          const rippleDelta = fixedSt.mul(0.5).sub(event.xy);
+          const rippleDistance = sqrt(rippleDelta.dot(rippleDelta));
+          const rippleDirection = rippleDelta.div(max(rippleDistance, 0.0001));
+          const waveRadius = event.z.mul(parameters.y);
+          const fromFront = rippleDistance.sub(waveRadius);
+          const phase = fromFront.mul(6.2831853).div(max(parameters.x, 0.02));
+          const frontWidth2 = max(parameters.z.mul(parameters.z).mul(2.0), 0.0002);
+          const frontEnvelope = exp(fromFront.mul(fromFront).div(frontWidth2).negate());
+          const progress = clamp(event.z.div(max(parameters.w, 0.1)), 0.0, 1.0);
+          const lifetimeFade = float(1.0).sub(progress).mul(float(1.0).sub(progress));
+          rippleOffset.assign(rippleOffset.add(
+            rippleDirection.mul(sin(phase).mul(frontEnvelope).mul(lifetimeFade).mul(event.w)),
+          ));
+        });
+      }
+    });
+    const rippleMagnitude = sqrt(rippleOffset.dot(rippleOffset));
+    const rippleBound = min(
+      1.0,
+      float(RIPPLE_DISPLACEMENT_CALIBRATION.maximumCombinedDisplacement)
+        .div(max(rippleMagnitude, 0.0001)),
+    );
+    const boundedRippleOffset = rippleOffset.mul(rippleBound).mul(2.0);
+    const structuralSt = st.add(activeOffset).add(shearOffset).add(boundedRippleOffset);
 
     const pack0 = advected(structuralSt);
     // Pointer push: velocity advects coordinates near the cursor.
@@ -456,6 +513,23 @@ export function updateUniforms(U, s, env) {
     shearEnabled ? shear.displacement.x : 0,
     shearEnabled ? shear.displacement.y : 0,
   );
+  const ripple = env.rippleDisplacement;
+  U.uRippleEnabled.value = ripple?.enabled === true && ripple.activeEventCount > 0 ? 1 : 0;
+  for (let index = 0; index < RIPPLE_DISPLACEMENT_CAPACITY; index++) {
+    const event = ripple?.events?.[index];
+    U.uRippleEvents[index].value.set(
+      event?.position?.x ?? 0,
+      event?.position?.y ?? 0,
+      event?.age ?? 0,
+      ripple?.enabled === true ? event?.displacement ?? 0 : 0,
+    );
+    U.uRippleParameters[index].value.set(
+      event?.wavelength ?? RIPPLE_EVENT_DEFAULTS.wavelength,
+      event?.propagationSpeed ?? RIPPLE_EVENT_DEFAULTS.propagationSpeed,
+      event?.width ?? RIPPLE_EVENT_DEFAULTS.width,
+      event?.lifetime ?? 1,
+    );
+  }
   U.uMode.value = env.mode;
   U.uFlowSpeed.value = s.flowSpeed;
   U.uFlowScale.value = s.flowScale;

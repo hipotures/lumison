@@ -33,6 +33,14 @@ import { adaptiveTick, createAdaptive, createPerf, perfTick } from './perf.js';
 import { applyPreset, mutate, randomize, resetParameters } from './presets.js';
 import { sampleSurface } from './probe.js';
 import {
+  configureRippleDisplacement,
+  createRippleDisplacementState,
+  RIPPLE_DISPLACEMENT_EVENT_TYPE,
+  rippleDisplacementConfiguration,
+  rippleDisplacementRenderState,
+  validateRippleDisplacementEvent,
+} from './ripple-displacement.js';
+import {
   applySnapshot,
   createSnapshot,
   createState,
@@ -81,6 +89,7 @@ export class TflEngine {
     this.motionWarp = createMotionWarpState();
     this.activeDeformation = createActiveDeformationState();
     this.coordinateShear = createCoordinateShearState();
+    this.rippleDisplacement = createRippleDisplacementState();
     this.events = createTransientStore(eventCapacity);
     this.viewport = { aspect: 1 };
     this.lastProbeTime = -Infinity;
@@ -177,6 +186,7 @@ export class TflEngine {
     this.motionWarp = createMotionWarpState();
     this.activeDeformation = createActiveDeformationState();
     this.coordinateShear = createCoordinateShearState();
+    this.rippleDisplacement = createRippleDisplacementState();
     this.events = createTransientStore(this.events.capacity);
     this.#rebuildQuality();
     return report;
@@ -272,7 +282,22 @@ export class TflEngine {
     return coordinateShearConfiguration(this.coordinateShear);
   }
 
+  setRippleDisplacement(changes) {
+    return configureRippleDisplacement(this.rippleDisplacement, changes);
+  }
+
+  getRippleDisplacementConfiguration() {
+    return rippleDisplacementConfiguration(this.rippleDisplacement);
+  }
+
   emitTransientEvent(event) {
+    if (event?.type === RIPPLE_DISPLACEMENT_EVENT_TYPE) {
+      const validation = validateRippleDisplacementEvent(event);
+      if (!validation.ok) {
+        return { accepted: false, reason: validation.reason, slot: null, evicted: null };
+      }
+      return addTransientEvent(this.events, validation.value);
+    }
     return addTransientEvent(this.events, event);
   }
 
@@ -329,6 +354,10 @@ export class TflEngine {
         this.coordinateShear,
         this.activeDeformation.configuration.radius,
       ),
+      rippleDisplacement: rippleDisplacementRenderState(
+        this.rippleDisplacement,
+        this.events,
+      ),
       renderScale: this.state.effective.renderScale,
     });
     if (result?.aspect) this.viewport.aspect = normalizeAspect(result.aspect);
@@ -346,6 +375,7 @@ export class TflEngine {
       motionWarp: motionWarpConfiguration(this.motionWarp),
       activeDeformation: activeDeformationConfiguration(this.activeDeformation),
       coordinateShear: coordinateShearConfiguration(this.coordinateShear),
+      rippleDisplacement: rippleDisplacementConfiguration(this.rippleDisplacement),
     };
     if (includeRuntime) {
       saved.runtime.influence = cloneInfluence(this.influence);
@@ -366,6 +396,7 @@ export class TflEngine {
     let restoredMotionWarp = null;
     let restoredActiveDeformation = null;
     let restoredCoordinateShear = null;
+    let restoredRippleDisplacement = null;
     const savedMotionWarp = saved?.interactions?.motionWarp;
     if (savedMotionWarp !== undefined) {
       restoredMotionWarp = createMotionWarpState();
@@ -394,6 +425,17 @@ export class TflEngine {
       );
       if (!shearReport.ok || shearReport.accepted.length !== 2) {
         return { ok: false, reason: 'invalid-coordinate-shear-configuration' };
+      }
+    }
+    const savedRippleDisplacement = saved?.interactions?.rippleDisplacement;
+    if (savedRippleDisplacement !== undefined) {
+      restoredRippleDisplacement = createRippleDisplacementState();
+      const rippleReport = configureRippleDisplacement(
+        restoredRippleDisplacement,
+        savedRippleDisplacement,
+      );
+      if (!rippleReport.ok || rippleReport.accepted.length !== 2) {
+        return { ok: false, reason: 'invalid-ripple-displacement-configuration' };
       }
     }
     if (options.restoreRuntime) {
@@ -460,6 +502,7 @@ export class TflEngine {
     if (restoredMotionWarp) this.motionWarp = restoredMotionWarp;
     if (restoredActiveDeformation) this.activeDeformation = restoredActiveDeformation;
     if (restoredCoordinateShear) this.coordinateShear = restoredCoordinateShear;
+    if (restoredRippleDisplacement) this.rippleDisplacement = restoredRippleDisplacement;
     this.#rebuildQuality();
     return result;
   }
@@ -517,6 +560,10 @@ export class TflEngine {
       coordinateShear: coordinateShearRenderState(
         this.coordinateShear,
         this.activeDeformation.configuration.radius,
+      ),
+      rippleDisplacement: rippleDisplacementRenderState(
+        this.rippleDisplacement,
+        this.events,
       ),
       transientEventCount: activeTransientCount(this.events),
       transientCapacity: this.events.capacity,
