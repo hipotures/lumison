@@ -1,7 +1,10 @@
-// Fixed-compatible engine state: parameter schema, validation and snapshots.
-// Browser persistence and Lab-only UI preferences live in apps/tfl-lab.
+// Canonical engine state and the authoritative numeric parameter transaction
+// path. Browser persistence and Lab-only UI preferences live in apps/tfl-lab.
+import { CLOCK_NAMES, createClocks } from './clocks.js';
+import { DEFAULT_MUTATION_SEED, DEFAULT_VISUAL_SEED, normalizeSeed } from './random.js';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+export const LEGACY_SCHEMA_VERSION = 1;
 export const QUALITY_LEVELS = ['Low', 'Medium', 'High', 'Ultra'];
 export const DIAG_MODES = ['Final', 'Thickness', 'Normal', 'Flow', 'Interference', 'Lighting'];
 export const TARGET_FPS_OPTIONS = [30, 60, 90, 120];
@@ -38,6 +41,17 @@ const DEFS = {
 
 export const PARAM_DEFS = DEFS;
 export const PARAM_NAMES = Object.keys(DEFS);
+export const PARAM_SCHEMA = Object.freeze(Object.fromEntries(
+  Object.entries(DEFS).map(([name, definition]) => [name, Object.freeze({
+    minimum: definition[0],
+    maximum: definition[1],
+    step: definition[2],
+    default: definition[3],
+    group: definition[4],
+    label: definition[5],
+    unit: name === 'filmBase' ? 'nm' : 'artistic',
+  })]),
+));
 
 export function defaultParams() {
   const params = {};
@@ -53,26 +67,17 @@ export function clampParam(name, value) {
   return Math.min(definition[1], Math.max(definition[0], value));
 }
 
-function sanitizeParams(raw) {
-  const clean = defaultParams();
-  if (raw && typeof raw === 'object') {
-    for (const name of PARAM_NAMES) {
-      if (typeof raw[name] === 'number' && Number.isFinite(raw[name])) {
-        clean[name] = clampParam(name, raw[name]);
-      }
-    }
-  }
-  return clean;
-}
-
-function sanitizeEnum(value, values, fallback) {
-  return values.includes(value) ? value : fallback;
-}
-
-export function createState({ reduceMotion = false } = {}) {
+export function createState({
+  reduceMotion = false,
+  visualSeed = DEFAULT_VISUAL_SEED,
+  mutationSeed = DEFAULT_MUTATION_SEED,
+} = {}) {
+  const defaults = defaultParams();
   const state = {
-    target: defaultParams(),
-    current: defaultParams(),
+    requested: { ...defaults },
+    target: { ...defaults },
+    current: { ...defaults },
+    effective: { ...defaults },
     preset: 'Soap Film',
     quality: 'High',
     diag: 'Final',
@@ -81,17 +86,76 @@ export function createState({ reduceMotion = false } = {}) {
     targetFps: 60,
     paused: false,
     locks: {},
-    simTime: 0,
+    clocks: createClocks(),
+    seeds: {
+      visual: normalizeSeed(visualSeed, DEFAULT_VISUAL_SEED),
+      mutation: normalizeSeed(mutationSeed, DEFAULT_MUTATION_SEED),
+    },
+    sequences: { mutation: 0 },
     reduceMotion: reduceMotion === true,
+    lastTransaction: emptyTransaction('initialize'),
   };
   if (state.reduceMotion) {
+    state.requested.temporal = 0.35;
     state.target.temporal = 0.35;
     state.current.temporal = 0.35;
+    state.effective.temporal = 0.35;
   }
   return state;
 }
 
+export function transactParameters(state, changes, {
+  source = 'unknown',
+  transition = 'smooth',
+  preset = 'Custom',
+  markPreset = true,
+} = {}) {
+  const report = emptyTransaction(source);
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+    report.rejected.push({ name: null, reason: 'changes-must-be-an-object' });
+    report.ok = false;
+    state.lastTransaction = report;
+    return report;
+  }
+
+  for (const [name, requestedValue] of Object.entries(changes)) {
+    const definition = DEFS[name];
+    if (!definition) {
+      report.rejected.push({ name, value: requestedValue, reason: 'unknown-parameter' });
+      continue;
+    }
+    if (state.locks?.[name] === true) {
+      report.skipped.push({ name, value: requestedValue, reason: 'locked' });
+      continue;
+    }
+    if (typeof requestedValue !== 'number' || !Number.isFinite(requestedValue)) {
+      report.rejected.push({ name, value: requestedValue, reason: 'value-must-be-finite-number' });
+      continue;
+    }
+    const value = clampParam(name, requestedValue);
+    state.requested[name] = value;
+    state.target[name] = value;
+    if (transition === 'immediate') {
+      state.current[name] = value;
+      state.effective[name] = value;
+    }
+    report.accepted.push({
+      name,
+      requestedValue,
+      value,
+      clamped: value !== requestedValue,
+    });
+  }
+
+  report.ok = report.rejected.length === 0;
+  report.changed = report.accepted.length > 0;
+  if (markPreset && report.changed) state.preset = report.skipped.length ? 'Custom' : preset;
+  state.lastTransaction = report;
+  return report;
+}
+
 export function smoothState(state, dt) {
+  if (!(typeof dt === 'number' && Number.isFinite(dt)) || dt <= 0) return;
   const amount = Math.min(1, dt * 3.2);
   for (const name of PARAM_NAMES) {
     const difference = state.target[name] - state.current[name];
@@ -103,9 +167,18 @@ export function smoothState(state, dt) {
   }
 }
 
-export function snapshot(state) {
-  return {
+export function synchronizeEffectiveParameters(state, { renderScale } = {}) {
+  for (const name of PARAM_NAMES) state.effective[name] = state.current[name];
+  if (typeof renderScale === 'number' && Number.isFinite(renderScale)) {
+    state.effective.renderScale = clampParam('renderScale', renderScale);
+  }
+  return state.effective;
+}
+
+export function createSnapshot(state, { includeRuntime = false } = {}) {
+  const saved = {
     version: SCHEMA_VERSION,
+    profile: 'fixed-compatibility',
     preset: state.preset,
     quality: state.quality,
     diag: state.diag,
@@ -114,32 +187,65 @@ export function snapshot(state) {
     targetFps: state.targetFps,
     paused: false,
     locks: { ...state.locks },
-    params: { ...state.target },
+    parameters: {
+      requested: { ...state.requested },
+      target: { ...state.target },
+    },
+    seeds: { ...state.seeds },
+    sequences: { mutation: state.sequences.mutation },
   };
+  if (includeRuntime) {
+    saved.runtime = {
+      paused: state.paused,
+      current: { ...state.current },
+      effective: { ...state.effective },
+      clocks: { ...state.clocks },
+    };
+  }
+  return saved;
 }
 
-export function applySnapshot(state, saved, { preserveLocks = false } = {}) {
-  if (!saved || typeof saved !== 'object' || saved.version !== SCHEMA_VERSION) return false;
+export const snapshot = createSnapshot;
 
-  const previousLocks = { ...(state.locks || {}) };
-  const previousTarget = { ...state.target };
-  const params = sanitizeParams(saved.params);
-  if (preserveLocks) {
-    for (const name of PARAM_NAMES) {
-      if (previousLocks[name] === true) params[name] = previousTarget[name];
-    }
+export function applySnapshot(state, saved, {
+  preserveLocks = false,
+  restoreRuntime = false,
+} = {}) {
+  if (!saved || typeof saved !== 'object'
+    || ![LEGACY_SCHEMA_VERSION, SCHEMA_VERSION].includes(saved.version)) {
+    return failedSnapshot('unsupported-snapshot-version');
   }
-  state.target = params;
-  state.locks = {};
+  const raw = saved.version === LEGACY_SCHEMA_VERSION
+    ? saved.params
+    : (saved.parameters?.target ?? saved.parameters?.requested);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return failedSnapshot('snapshot-parameters-missing');
+  }
+  if (restoreRuntime && (saved.version !== SCHEMA_VERSION || !validRuntimeState(saved.runtime))) {
+    return failedSnapshot('invalid-or-missing-runtime-state');
+  }
+
+  const patch = defaultParams();
+  for (const name of PARAM_NAMES) {
+    if (!Object.hasOwn(raw, name)) continue;
+    if (typeof raw[name] !== 'number' || !Number.isFinite(raw[name])) {
+      return failedSnapshot(`invalid-snapshot-parameter:${name}`);
+    }
+    patch[name] = raw[name];
+  }
+  const previousLocks = { ...state.locks };
+  if (!preserveLocks) state.locks = {};
+  const transaction = transactParameters(state, patch, {
+    source: saved.version === LEGACY_SCHEMA_VERSION ? 'snapshot-v1' : 'snapshot-v2',
+    transition: 'immediate',
+    markPreset: false,
+  });
+
   if (preserveLocks) {
     state.locks = previousLocks;
-  } else if (saved.locks && typeof saved.locks === 'object') {
-    for (const name of PARAM_NAMES) {
-      if (saved.locks[name] === true) state.locks[name] = true;
-    }
+  } else {
+    state.locks = sanitizeLocks(saved.locks);
   }
-
-  state.current.renderScale = params.renderScale;
   state.quality = sanitizeEnum(saved.quality, QUALITY_LEVELS, state.quality);
   state.diag = sanitizeEnum(saved.diag, DIAG_MODES, 'Final');
   state.msaa = [0, 2, 4].includes(saved.msaa) ? saved.msaa : 0;
@@ -148,20 +254,33 @@ export function applySnapshot(state, saved, { preserveLocks = false } = {}) {
   if (typeof saved.preset === 'string') {
     state.preset = preserveLocks && Object.keys(state.locks).length ? 'Custom' : saved.preset;
   }
-  return true;
+
+  if (saved.version === SCHEMA_VERSION) {
+    state.seeds.visual = normalizeSeed(saved.seeds?.visual, state.seeds.visual);
+    state.seeds.mutation = normalizeSeed(saved.seeds?.mutation, state.seeds.mutation);
+    state.sequences.mutation = normalizeSeed(saved.sequences?.mutation, 0);
+  }
+  if (restoreRuntime && saved.version === SCHEMA_VERSION && saved.runtime) {
+    restoreRuntimeState(state, saved.runtime);
+  } else {
+    synchronizeEffectiveParameters(state, { renderScale: state.current.renderScale });
+  }
+  return { ok: true, transaction, migrated: saved.version === LEGACY_SCHEMA_VERSION };
 }
 
 export function setParameter(state, name, value) {
-  if (!DEFS[name] || state.locks?.[name]) return false;
-  state.target[name] = clampParam(name, value);
-  state.preset = 'Custom';
-  return true;
+  return transactParameters(state, { [name]: value }, { source: 'parameter' });
 }
 
 export function resetParameter(state, name) {
-  if (!DEFS[name] || state.locks?.[name]) return false;
-  state.target[name] = DEFS[name][3];
-  return true;
+  if (!DEFS[name]) {
+    return transactParameters(state, { [name]: undefined }, { source: 'parameter-reset' });
+  }
+  return transactParameters(state, { [name]: DEFS[name][3] }, {
+    source: 'parameter-reset',
+    preset: state.preset,
+    markPreset: false,
+  });
 }
 
 export function setParameterLock(state, name, locked) {
@@ -169,6 +288,7 @@ export function setParameterLock(state, name, locked) {
   if (locked) {
     state.locks[name] = true;
     state.current[name] = state.target[name];
+    state.effective[name] = state.target[name];
   } else {
     delete state.locks[name];
   }
@@ -176,6 +296,70 @@ export function setParameterLock(state, name, locked) {
 }
 
 export function factoryResetState(state) {
-  const fresh = createState({ reduceMotion: state.reduceMotion });
-  for (const [key, value] of Object.entries(fresh)) state[key] = value;
+  const fresh = createState({
+    reduceMotion: state.reduceMotion,
+    visualSeed: DEFAULT_VISUAL_SEED,
+    mutationSeed: DEFAULT_MUTATION_SEED,
+  });
+  for (const key of Object.keys(state)) delete state[key];
+  Object.assign(state, fresh);
+}
+
+function emptyTransaction(source) {
+  return {
+    source,
+    ok: true,
+    changed: false,
+    accepted: [],
+    skipped: [],
+    rejected: [],
+  };
+}
+
+function failedSnapshot(reason) {
+  return { ok: false, reason, transaction: null, migrated: false };
+}
+
+function sanitizeEnum(value, values, fallback) {
+  return values.includes(value) ? value : fallback;
+}
+
+function sanitizeLocks(raw) {
+  const locks = {};
+  if (raw && typeof raw === 'object') {
+    for (const name of PARAM_NAMES) if (raw[name] === true) locks[name] = true;
+  }
+  return locks;
+}
+
+function restoreRuntimeState(state, runtime) {
+  state.paused = runtime.paused === true;
+  state.clocks = createClocks(runtime.clocks);
+  for (const name of PARAM_NAMES) {
+    const current = runtime.current?.[name];
+    const effective = runtime.effective?.[name];
+    state.current[name] = typeof current === 'number' && Number.isFinite(current)
+      ? clampParam(name, current)
+      : state.target[name];
+    state.effective[name] = typeof effective === 'number' && Number.isFinite(effective)
+      ? clampParam(name, effective)
+      : state.current[name];
+  }
+}
+
+function validRuntimeState(runtime) {
+  if (!runtime || typeof runtime !== 'object'
+    || !runtime.current || !runtime.effective || !runtime.clocks
+    || typeof runtime.paused !== 'boolean') return false;
+  for (const name of PARAM_NAMES) {
+    for (const layer of ['current', 'effective']) {
+      const value = runtime[layer][name];
+      if (typeof value !== 'number' || !Number.isFinite(value)
+        || clampParam(name, value) !== value) return false;
+    }
+  }
+  return CLOCK_NAMES.every((name) => {
+    const value = runtime.clocks[name];
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  });
 }

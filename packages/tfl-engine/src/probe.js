@@ -1,14 +1,9 @@
 import { sampleFieldApprox } from './film.js';
 
-let lastProbe = 0;
-
-// Fixed-compatible approximate CPU sample. The caller supplies interaction
-// coordinates; this module has no knowledge of pointer events or UI.
-export function sampleSurface(interaction, params, time, minInterval = 70) {
+// Fixed-compatible approximate CPU sample. Throttling and tooltip placement
+// are application policy; this pure sampler has no wall-clock or DOM access.
+export function sampleSurface(interaction, params, time) {
   if (!interaction?.active) return null;
-  const now = performance.now();
-  if (now - lastProbe < minInterval) return 'throttled';
-  lastProbe = now;
   try {
     const sample = sampleFieldApprox(interaction.x, interaction.y, params, time, {
       x: interaction.x,
@@ -19,15 +14,11 @@ export function sampleSurface(interaction, params, time, minInterval = 70) {
       ...sample,
       u: interaction.x,
       v: interaction.y,
-      px: interaction.hoverX,
-      py: interaction.hoverY,
     };
   } catch (error) {
     console.warn('Surface probe failed:', error);
     return {
       error: error?.message ?? String(error),
-      px: interaction.hoverX,
-      py: interaction.hoverY,
     };
   }
 }

@@ -11,8 +11,9 @@ try {
   console.error('main module failed:', error);
   bootMsg('Three.js unavailable — starting Canvas2D fallback…');
   try {
-    const [{ createState }, { createFallback }] = await Promise.all([
+    const [{ createState }, { advanceClocks }, { createFallback }] = await Promise.all([
       import('../../../packages/tfl-engine/src/state.js'),
+      import('../../../packages/tfl-engine/src/clocks.js'),
       import('../../../packages/tfl-engine/src/fallback.js'),
     ]);
     const reduceMotion = typeof matchMedia === 'function'
@@ -33,8 +34,8 @@ try {
     }
     const interaction = { x: 0.5, y: 0.5, strength: 0 };
     const frame = () => {
-      state.simTime += 1 / 60;
-      fallback.frame(state, state.simTime, interaction);
+      advanceClocks(state.clocks, 1 / 60, state.current);
+      fallback.frame(state, state.clocks.animation, interaction);
       requestAnimationFrame(frame);
     };
     frame();

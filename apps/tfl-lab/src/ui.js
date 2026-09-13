@@ -22,7 +22,7 @@ const GROUPS = [
 const GROUP_OF = {};
 for (const [k, d] of Object.entries(PARAM_DEFS)) GROUP_OF[k] = d[4];
 
-export function buildUI(root, state, A) {
+export function buildUI(root, state, labState, A) {
   root.innerHTML = '';
   const head = el('div', 'panel-head');
   head.append(el('div', 'panel-title', 'Thin-Film Lab'));
@@ -46,9 +46,9 @@ export function buildUI(root, state, A) {
   for (const [gid, title] of GROUPS) {
     const det = document.createElement('details');
     det.className = 'section';
-    det.open = state.panelCollapsed[gid] !== true || gid === 'preset';
+    det.open = labState.panelCollapsed[gid] !== true || gid === 'preset';
     det.addEventListener('toggle', () => {
-      state.panelCollapsed[gid] = !det.open;
+      labState.panelCollapsed[gid] = !det.open;
       A.persistSoon();
     });
     const sum = document.createElement('summary');
@@ -124,7 +124,7 @@ export function buildUI(root, state, A) {
   // ---- view ----
   const vsec = sections.view;
   vsec.append(kvRow('Diagnostic view (D)', diagSelect()));
-  vsec.append(toggleRow('Surface probe', state.probe, (v) => A.probe(v)));
+  vsec.append(toggleRow('Surface probe', labState.probe, (v) => A.probe(v)));
   vsec.append(hint('Probe: hover the film for a live local thickness / normal readout. Click or drag the film to disturb the surface.'));
 
   // ---- actions ----
@@ -234,7 +234,7 @@ export function buildUI(root, state, A) {
     const aq = root.querySelector('input[aria-label="Adaptive quality"]');
     if (aq) aq.checked = state.adaptive;
     const pr = root.querySelector('input[aria-label="Surface probe"]');
-    if (pr) pr.checked = state.probe;
+    if (pr) pr.checked = labState.probe;
     pauseBtn.textContent = state.paused ? '▶' : '⏸';
     pauseBtn.setAttribute('aria-pressed', String(state.paused));
   }

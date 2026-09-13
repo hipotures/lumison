@@ -140,7 +140,10 @@ export function fitRenderer(renderer, canvas, renderScale, maxRatio = 2) {
 
 export function pushFrameUniforms(stage, state, env) {
   updateUniforms(stage.uniforms, state.current, {
-    time: state.simTime,
+    // Fixed compatibility deliberately keeps the single historical material
+    // clock. Canonical flow/lighting clocks remain observable but do not alter
+    // Phase 1 shader phase behavior.
+    time: state.clocks.animation,
     aspect: env.aspect,
     width: env.bufW,
     height: env.bufH,

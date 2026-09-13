@@ -1,7 +1,8 @@
 // Presets: coherent multi-parameter configurations. Each preset alters fluid
 // behavior, thickness response, optics, lighting and (sometimes) quality, so
 // switching presets changes the material character, not just a color palette.
-import { clampParam, PARAM_DEFS } from './state.js';
+import { clampParam, defaultParams, transactParameters } from './state.js';
+import { nextStateRandom } from './random.js';
 
 export const PRESETS = {
   'Soap Film': {
@@ -68,21 +69,24 @@ function isLocked(state, key) {
   return state.locks?.[key] === true;
 }
 
-export function applyPreset(state, name) {
+export function applyPreset(state, name, { transition = 'smooth' } = {}) {
   const p = PRESETS[name];
-  if (!p) return false;
-  let skipped = false;
-  for (const [k, v] of Object.entries(p)) {
-    if (isLocked(state, k)) { skipped = true; continue; }
-    state.target[k] = clampParam(k, v);
+  if (!p) {
+    return transactParameters(state, null, { source: `preset:${name}` });
   }
-  state.preset = skipped ? 'Custom' : name;
-  return true;
+  const report = transactParameters(state, p, {
+    source: `preset:${name}`,
+    transition,
+    markPreset: false,
+  });
+  state.preset = report.skipped.length ? 'Custom' : name;
+  return report;
 }
 
 // Controlled variation: perturb a subset of params within sensible bounds,
 // preserving the general character of the current configuration.
-export function mutate(state, rand = Math.random) {
+export function mutate(state, random = null) {
+  const rand = random ?? (() => nextStateRandom(state));
   const t = state.target;
   const pick = (arr, n) => {
     const c = [...arr];
@@ -96,6 +100,7 @@ export function mutate(state, rand = Math.random) {
     'saturation', 'sharpness', 'azimuth', 'elevation', 'highlight', 'ambient',
     'fresnel', 'specular', 'lightMotion', 'exposure', 'contrast',
   ].filter((k) => !isLocked(state, k)), 7 + Math.floor(rand() * 3));
+  const changes = {};
   for (const k of keys) {
     const range = k === 'filmBase' ? 90 : k === 'azimuth' ? 60 : k === 'sharpness' ? 40 : null;
     const span = range ?? null;
@@ -103,19 +108,22 @@ export function mutate(state, rand = Math.random) {
     const delta = span !== null
       ? (rand() * 2 - 1) * span
       : cur * (rand() * 2 - 1) * 0.28;
-    t[k] = clampParam(k, cur + delta);
+    changes[k] = clampParam(k, cur + delta);
   }
+  const report = transactParameters(state, changes, { source: 'mutate', markPreset: false });
   state.preset = 'Custom';
+  return report;
 }
 
 // Full randomize: generate a fresh, independent visual configuration rather
 // than multiplying the current values. This prevents repeated Randomize calls
 // from getting trapped in a dark / low-exposure corner of parameter space.
 // Rendering resolution is intentionally not randomized.
-export function randomize(state, rand = Math.random) {
-  const t = state.target;
+export function randomize(state, random = null) {
+  const rand = random ?? (() => nextStateRandom(state));
+  const changes = {};
   const set = (k, lo, hi) => {
-    if (!isLocked(state, k)) t[k] = clampParam(k, lo + rand() * (hi - lo));
+    if (!isLocked(state, k)) changes[k] = clampParam(k, lo + rand() * (hi - lo));
   };
 
   set('flowSpeed', 0.20, 1.85);
@@ -147,7 +155,9 @@ export function randomize(state, rand = Math.random) {
   set('temporal', 0.35, 1.65);
   set('grain', 0.002, 0.014);
 
+  const report = transactParameters(state, changes, { source: 'randomize', markPreset: false });
   state.preset = 'Custom';
+  return report;
 }
 
 // Fixed's ordinary Reset preserves quality, MSAA and every locked numeric
@@ -155,10 +165,15 @@ export function randomize(state, rand = Math.random) {
 export function resetParameters(state) {
   const quality = state.quality;
   const msaa = state.msaa;
-  for (const [name, definition] of Object.entries(PARAM_DEFS)) {
-    if (!state.locks?.[name]) state.target[name] = definition[3];
-  }
-  applyPreset(state, 'Soap Film');
+  const report = transactParameters(state, {
+    ...defaultParams(),
+    ...PRESETS['Soap Film'],
+  }, {
+    source: 'reset',
+    markPreset: false,
+  });
+  state.preset = report.skipped.length ? 'Custom' : 'Soap Film';
   state.quality = quality;
   state.msaa = msaa;
+  return report;
 }

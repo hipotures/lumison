@@ -2,11 +2,12 @@
 // persistence and presentation stay here; rendering and visual state use the
 // TFL Engine facade.
 import { createState, DIAG_MODES, TflEngine } from '../../../packages/tfl-engine/src/index.js';
-import { createPointer } from './input.js';
+import { createBrowserRenderHost } from '../../../packages/tfl-engine/src/browser.js';
+import { createPointerAdapter } from './input.js';
 import { buildUI } from './ui.js';
 import { copyText, downloadBlob, toast, toggleFullscreen } from './util.js';
 import {
-  addLabState, applyLabSnapshot, clearLabState, loadLabSnapshot,
+  applyLabSnapshot, clearLabState, createLabState, loadLabSnapshot,
   resetLabUiState, saveLabState, snapshotLab,
 } from './persistence.js';
 
@@ -64,7 +65,8 @@ function setStatus(html, ok = false) {
 async function boot() {
   const reduceMotion = typeof matchMedia === 'function'
     && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const state = addLabState(createState({ reduceMotion }));
+  const state = createState({ reduceMotion });
+  const labState = createLabState();
   const canvas = document.getElementById('stage');
   const fallbackCanvas = document.getElementById('fallback2d');
   const panel = document.getElementById('panel');
@@ -80,9 +82,9 @@ async function boot() {
     persistTimer: 0,
   };
 
+  const renderHost = createBrowserRenderHost({ canvas, fallbackCanvas });
   const engine = new TflEngine({
-    canvas,
-    fallbackCanvas,
+    renderHost,
     state,
     onBackendChange: ({ backend, fallback, quality, reason }) => {
       canvas.hidden = fallback;
@@ -100,19 +102,18 @@ async function boot() {
   });
 
   const saved = loadLabSnapshot();
-  if (!saved || !applyLabSnapshot(engine, state, saved)) {
-    engine.applyPreset('Soap Film');
-    state.current = { ...state.target };
+  if (!saved || !applyLabSnapshot(engine, labState, saved)) {
+    engine.applyPreset('Soap Film', { transition: 'immediate' });
   }
 
   const persistSoon = () => {
     clearTimeout(app.persistTimer);
-    app.persistTimer = setTimeout(() => saveLabState(engine, state), 600);
+    app.persistTimer = setTimeout(() => saveLabState(engine, labState), 600);
   };
 
   function applyPanelVisibility() {
-    panel.classList.toggle('hidden-panel', !state.panelOpen);
-    fab.hidden = state.panelOpen;
+    panel.classList.toggle('hidden-panel', !labState.panelOpen);
+    fab.hidden = labState.panelOpen;
   }
 
   function captureFrame() {
@@ -130,13 +131,16 @@ async function boot() {
   }
 
   function updateProbe(force = false) {
-    if (!state.probe || !probeTip) {
+    if (!labState.probe || !probeTip) {
       if (probeTip) probeTip.hidden = true;
       return;
     }
     let sample;
     try {
-      sample = engine.sampleSurface(app.pointer, force ? 0 : 55);
+      sample = engine.sampleSurface({
+        now: performance.now() / 1000,
+        minIntervalSeconds: force ? 0 : 0.055,
+      });
     } catch (error) {
       console.warn('Surface probe update failed:', error);
       sample = null;
@@ -156,8 +160,8 @@ async function boot() {
         `normal <b>${nx.toFixed(2)}, ${ny.toFixed(2)}, ${nz.toFixed(2)}</b>`;
     }
     probeTip.hidden = false;
-    const px = Math.min(window.innerWidth - 210, (sample.px ?? 0) + 18);
-    const py = Math.min(window.innerHeight - 94, (sample.py ?? 0) + 16);
+    const px = Math.min(window.innerWidth - 210, app.pointer.screenPosition.x + 18);
+    const py = Math.min(window.innerHeight - 94, app.pointer.screenPosition.y + 16);
     probeTip.style.left = `${Math.max(8, px)}px`;
     probeTip.style.top = `${Math.max(8, py)}px`;
   }
@@ -170,12 +174,15 @@ async function boot() {
       `backend  <b>${diagnostic.backend}</b>`,
       `fps      <b>${diagnostic.fps.toFixed(1)}</b>  frame <b>${diagnostic.frameMs.toFixed(2)} ms</b>`,
       `buffer   ${diagnostic.bufferWidth === null ? 'n/a (2d)' : `${diagnostic.bufferWidth}×${diagnostic.bufferHeight} px`}  ratio <b>${diagnostic.ratio === null ? '—' : diagnostic.ratio.toFixed(2)}</b>`,
-      `dpr      ${(window.devicePixelRatio || 1).toFixed(2)}  scale <b>${diagnostic.effectiveScale.toFixed(2)}</b>`,
+      `dpr      ${(window.devicePixelRatio || 1).toFixed(2)}  scale req/cur/eff <b>${diagnostic.requestedScale.toFixed(2)} / ${diagnostic.currentScale.toFixed(2)} / ${diagnostic.effectiveScale.toFixed(2)}</b>`,
       `present  <b>${app.displayHz} Hz</b>${state.adaptive && state.targetFps > app.displayHz ? `  requested ${state.targetFps} fps · adaptive uses ${app.displayHz}` : ''}`,
       `quality  <b>${diagnostic.effectiveQuality ?? '—'}</b>${state.adaptive ? ` (auto scale only · ${diagnostic.adaptiveAction})` : ' (manual)'}`,
       statistics && statistics.calls !== null
         ? `calls    ${statistics.calls}  tris ${statistics.triangles ?? '—'}`
         : null,
+      `input    pos <b>${diagnostic.influence.position.x.toFixed(3)}, ${diagnostic.influence.position.y.toFixed(3)}</b>  vel <b>${diagnostic.influence.velocity.x.toFixed(2)}, ${diagnostic.influence.velocity.y.toFixed(2)}</b>  strength <b>${diagnostic.influence.strength.toFixed(2)}</b>`,
+      `clocks   animation ${diagnostic.clocks.animation.toFixed(2)}  flow ${diagnostic.clocks.flow.toFixed(2)}  light ${diagnostic.clocks.lighting.toFixed(2)}  events ${diagnostic.clocks.events.toFixed(2)}`,
+      `events   ${diagnostic.transientEventCount}/${diagnostic.transientCapacity}  locks ${diagnostic.lockCount}  tx ${diagnostic.lastTransaction.accepted}/${diagnostic.lastTransaction.skipped}/${diagnostic.lastTransaction.rejected}`,
       `mode     ${state.diag}${state.paused ? '  ·  PAUSED' : ''}`,
     ].filter(Boolean).join('\n');
     app.ui.setDiag(lines);
@@ -183,15 +190,15 @@ async function boot() {
 
   const actions = {
     persistSoon,
-    param: (name, value) => { if (engine.setParameter(name, value)) persistSoon(); },
+    param: (name, value) => { if (engine.setParameter(name, value).changed) persistSoon(); },
     resetParam: (name) => {
-      if (engine.resetParameter(name)) { app.ui?.sync(); persistSoon(); }
+      if (engine.resetParameter(name).changed) { app.ui?.sync(); persistSoon(); }
     },
     lockParam: (name, locked) => {
       if (engine.setParameterLock(name, locked)) { app.ui?.sync(); persistSoon(); }
     },
     preset: (name) => {
-      if (engine.applyPreset(name)) { app.ui?.sync(); persistSoon(); }
+      if (engine.applyPreset(name).ok) { app.ui?.sync(); persistSoon(); }
     },
     mutate: () => { engine.mutate(); app.ui?.sync(); persistSoon(); },
     randomize: () => { engine.randomize(); app.ui?.sync(); persistSoon(); },
@@ -206,22 +213,22 @@ async function boot() {
     factoryReset: () => {
       clearLabState();
       engine.factoryReset();
-      resetLabUiState(state);
+      resetLabUiState(labState);
       applyPanelVisibility();
       app.ui?.sync();
-      saveLabState(engine, state);
+      saveLabState(engine, labState);
       toast('Factory reset complete');
     },
     togglePause: () => { engine.togglePaused(); app.ui?.sync(); persistSoon(); },
     fullscreen: () => { toggleFullscreen(); },
-    hidePanel: () => { state.panelOpen = false; applyPanelVisibility(); persistSoon(); },
-    showPanel: () => { state.panelOpen = true; applyPanelVisibility(); persistSoon(); },
+    hidePanel: () => { labState.panelOpen = false; applyPanelVisibility(); persistSoon(); },
+    showPanel: () => { labState.panelOpen = true; applyPanelVisibility(); persistSoon(); },
     quality: (quality) => {
       if (engine.setQuality(quality)) { app.ui?.sync(); persistSoon(); }
     },
     msaa: (value) => {
       if (state.msaa === value || !engine.setMsaa(value)) return;
-      saveLabState(engine, state);
+      saveLabState(engine, labState);
       location.reload();
     },
     adaptive: (enabled) => { engine.setAdaptive(enabled); app.ui?.sync(); persistSoon(); },
@@ -236,14 +243,14 @@ async function boot() {
       actions.diag(DIAG_MODES[(index + 1) % DIAG_MODES.length]);
     },
     probe: (enabled) => {
-      state.probe = enabled;
+      labState.probe = enabled;
       if (probeTip) probeTip.hidden = true;
       if (enabled) setTimeout(() => updateProbe(true), 0);
       persistSoon();
     },
     capture: captureFrame,
     exportSettings: async () => {
-      const json = JSON.stringify(snapshotLab(engine, state));
+      const json = JSON.stringify(snapshotLab(engine, labState));
       const copied = await copyText(json);
       const dialog = document.getElementById('settingsDialog');
       const text = document.getElementById('settingsText');
@@ -260,7 +267,7 @@ async function boot() {
     },
   };
 
-  app.ui = buildUI(panel, state, actions);
+  app.ui = buildUI(panel, state, labState, actions);
   applyPanelVisibility();
   fab.addEventListener('click', () => actions.showPanel());
 
@@ -274,10 +281,10 @@ async function boot() {
     const text = document.getElementById('settingsText');
     try {
       const parsed = JSON.parse(text.value);
-      if (applyLabSnapshot(engine, state, parsed, { preserveLocks: true })) {
+      if (applyLabSnapshot(engine, labState, parsed, { preserveLocks: true })) {
         applyPanelVisibility();
         app.ui?.sync();
-        saveLabState(engine, state);
+        saveLabState(engine, labState);
         dialog?.close?.();
         toast('Settings applied');
       } else {
@@ -288,10 +295,20 @@ async function boot() {
     }
   });
 
-  app.pointer = createPointer(canvas, [fallbackCanvas]);
+  app.pointer = createPointerAdapter(canvas, [fallbackCanvas]);
+  const submitInfluence = () => {
+    engine.setViewport({ aspect: app.pointer.aspect });
+    engine.setSpatialInfluence(app.pointer.influence);
+  };
   for (const target of [canvas, fallbackCanvas]) {
-    target.addEventListener('pointermove', () => { if (state.probe) updateProbe(false); });
-    target.addEventListener('pointerdown', () => { if (state.probe) updateProbe(true); });
+    target.addEventListener('pointermove', () => {
+      submitInfluence();
+      if (labState.probe) updateProbe(false);
+    });
+    target.addEventListener('pointerdown', () => {
+      submitInfluence();
+      if (labState.probe) updateProbe(true);
+    });
   }
 
   window.addEventListener('keydown', (event) => {
@@ -303,15 +320,15 @@ async function boot() {
     else if (event.key === 'r' || event.key === 'R') actions.randomize();
     else if (event.key === 'f' || event.key === 'F') actions.fullscreen();
     else if (event.key === 'h' || event.key === 'H') {
-      (state.panelOpen ? actions.hidePanel : actions.showPanel)();
+      (labState.panelOpen ? actions.hidePanel : actions.showPanel)();
     } else if (event.key === 'd' || event.key === 'D') actions.cycleDiag();
-    else if (event.key === 'Escape' && state.panelOpen) actions.hidePanel();
+    else if (event.key === 'Escape' && labState.panelOpen) actions.hidePanel();
   });
 
-  const observer = new ResizeObserver(() => engine.resizeFallback());
+  const observer = new ResizeObserver(() => engine.resize());
   observer.observe(document.body);
-  window.addEventListener('orientationchange', () => engine.resizeFallback());
-  document.addEventListener('fullscreenchange', () => setTimeout(() => engine.resizeFallback(), 60));
+  window.addEventListener('orientationchange', () => engine.resize());
+  document.addEventListener('fullscreenchange', () => setTimeout(() => engine.resize(), 60));
   document.addEventListener('visibilitychange', () => { app.lastFrame = performance.now(); });
 
   bootMsg('Measuring display refresh…');
@@ -327,14 +344,16 @@ async function boot() {
     if (!(dt >= 0) || dt > 0.25) dt = 0.025;
     if (document.hidden) { requestAnimationFrame(frame); return; }
 
-    app.pointer.update(dt);
-    engine.renderFrame(dt, app.pointer, now, app.displayHz);
+    app.pointer.advance(dt);
+    submitInfluence();
+    engine.advance(dt);
+    engine.render({ now, displayHz: app.displayHz });
     app.diagnosticTimer += dt;
     if (app.diagnosticTimer > 0.5) {
       app.diagnosticTimer = 0;
       updateDiagnostics();
     }
-    if (state.probe) {
+    if (labState.probe) {
       app.probeTimer += dt;
       if (app.probeTimer > 0.08) {
         app.probeTimer = 0;

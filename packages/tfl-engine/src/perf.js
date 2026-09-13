@@ -32,7 +32,9 @@ export function perfTick(perf, dtMs) {
 export function createAdaptive() {
   return {
     windowFps: [],
-    windowStart: performance.now(),
+    // The caller supplies every timestamp to adaptiveTick. Starting at zero is
+    // deterministic and the first active tick establishes the real window.
+    windowStart: 0,
     badWindows: 0,
     goodWindows: 0,
     cooldownUntil: 0,

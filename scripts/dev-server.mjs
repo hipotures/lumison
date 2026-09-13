@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.argv[2] ?? process.env.PORT ?? 8000);
+const host = process.env.HOST?.trim() || null;
 const mime = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -47,6 +48,13 @@ const server = http.createServer((request, response) => {
   }
 });
 
-server.listen(port, () => {
-  console.log(`TFL Lab: http://localhost:${port}/apps/tfl-lab/`);
-});
+const onListening = () => {
+  const displayHost = host?.includes(':') ? `[${host}]` : (host ?? 'localhost');
+  console.log(`TFL Lab: http://${displayHost}:${port}/apps/tfl-lab/`);
+};
+
+if (host) {
+  server.listen(port, host, onListening);
+} else {
+  server.listen(port, onListening);
+}

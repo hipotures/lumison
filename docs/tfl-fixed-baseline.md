@@ -1,5 +1,7 @@
 # Fixed TFL compatibility baseline
 
+The Phase 1 reference commit is `f7e15a4c458293c9925139887a984ca5034de50f`, tagged `tfl-fixed-baseline`.
+
 ## Scope and provenance
 
 Phase 1 ports the historical implementation at `tmp/thin-film-lab-fixed/` into the real TFL Lab and TFL Engine directories. The visual field, shader constants, optical grading, lighting, pointer response, presets and quality definitions are carried over without intentional tuning. The archive remains read-only.
@@ -42,6 +44,8 @@ The Canvas fallback is deliberately approximate. It renders layered gradients an
 
 Unit tests cover parameter definitions and bounds, snapshot validation, persistence-compatible lock round trips, lock-preserving imports, every preset, mutation/randomization bounds, lock handling, ordinary reset semantics, factory reset, reduced-motion state, smoothing and adaptive-scale descent/recovery. Syntax checks cover JavaScript under `apps/`, `packages/`, `scripts/` and `test/`. The development server was smoke-tested during Phase 1 by requesting the Lab page and its cross-directory engine/dependency modules.
 
+Phase 2 adds tests for canonical coordinates and velocity, requested/target/current/effective state, transaction reports, explicit clocks and pause, bounded transient allocation/lifetime, deterministic seeds/replay, runtime snapshots and DOM-free use of the source-neutral API.
+
 No browser automation or installed browser was available in the implementation environment. Shader compilation, WebGPU/WebGL2 initialization, interactive input and visual equivalence therefore require manual review. Passing syntax and unit tests is not evidence of visual parity.
 
 ## Manual visual acceptance checklist
@@ -62,6 +66,27 @@ Run `npm install`, then `npm run dev:tfl`, and open `http://localhost:8000/apps/
 - Reload and confirm ordinary settings, locks, panel visibility and probe preference persist.
 - If the GPU path is unavailable, confirm the fallback is visibly labelled and its documented limitations are acceptable.
 
-## Compatibility debt deferred to Phase 2
+## Phase 2 manual compatibility gate
 
-The public engine still uses the Fixed parameter names and mixed target/current state shape. Its numeric interaction descriptor still uses Fixed UV fields (`x`, `y`, `vx`, `vy`, `strength`) and the renderer still accesses browser viewport/DPR globals. Parameter definitions retain UI labels/group identifiers so the historical schema-driven panel stays exact. The v1 snapshot format combines engine configuration with Lab preferences in the Lab persistence adapter. Surface Probe is an approximate CPU mirror rather than an exact GPU readback. These are documented seams for Phase 2; this phase does not introduce canonical coordinates, units, clocks or a redesigned interaction API.
+Phase 2 replaces the mixed target/current and Fixed-UV control seam with the contracts in `docs/tfl-engine-contract.md`. It deliberately retains the Fixed shader, values and compatibility mapping. Automated state and coordinate tests cannot establish visual equivalence.
+
+Run `npm install`, then `npm run dev:tfl`, open `http://localhost:8000/apps/tfl-lab/`, and compare against the tagged baseline where useful. Verify all of the following before Phase 3:
+
+1. Startup uses WebGPU or WebGL2 and visually matches the tagged Fixed baseline.
+2. Soap Film matches the baseline.
+3. Oil Slick, Deep Violet, Electric Cells and several other presets match.
+4. Mutate retains its existing visual character.
+5. Randomize retains its existing behavior.
+6. Parameter locks still protect values from presets, Mutate, Randomize, Reset and Import.
+7. Hover alone causes no visual disturbance.
+8. Click behavior matches Phase 1.
+9. Drag behavior matches Phase 1.
+10. Release and decay match Phase 1, including while paused.
+11. Surface Probe follows the pointer and reports values.
+12. All six diagnostic material views still work.
+13. Adaptive render scale steps down and recovers without changing the selected material quality.
+14. Reset preserves locks/quality/MSAA and Factory Reset clears locks and restores Soap Film.
+15. Pause/resume introduces no new flicker, phase jump or catch-up.
+16. Resizing and orientation changes do not visibly misalign the interaction position.
+
+No Qwen or Mobile behavior should be visible. Surface Probe remains an approximate CPU mirror rather than an exact GPU readback. Parameter definitions still carry UI group/label metadata to preserve the schema-driven Fixed panel; separating presentation metadata can wait until it has a concrete consumer.
