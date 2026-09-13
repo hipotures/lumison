@@ -3,6 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check apps/tfl-lab/src/main.js && node --check apps/lumison/src/main.js && node --check packages/tfl-engine/src/index.js"
+    "check": "node scripts/check.mjs",
+    "dev:tfl": "node scripts/dev-server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "three": "0.185.1"
   }
 }

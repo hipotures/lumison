@@ -6,7 +6,7 @@ TFL Lab ─────┐
 Lumison ─────┘
 ```
 
-These arrows describe future dependencies. The current entry points are placeholders and do not wire applications to an engine yet.
+These arrows describe dependencies. Phase 1 wires TFL Lab to the Fixed-compatible engine; Lumison remains a placeholder.
 
 ## Responsibilities and boundaries
 
@@ -18,8 +18,8 @@ Future extraction of TFL Engine and TFL Lab into separate packages/repositories 
 
 ## Initial scope
 
-Use vanilla modern JavaScript and ES modules. The root package provides only module configuration and a dependency-free syntax check; this is a directory-based monorepo layout without package-manager workspace wiring yet.
+Use vanilla modern JavaScript and ES modules. TFL rendering uses Three.js 0.185.1 as an explicit pinned dependency, without a framework or bundler. This remains a directory-based monorepo layout without package-manager workspace wiring.
 
 The first musical instrument will be a piano using MIDI. Do not create speculative instrument abstractions or class hierarchies. Implement concrete boundaries as needed by the first applications.
 
-`tmp/` is an immutable archive of historical experiments and reference implementations for now. This setup does not modify, rename, delete, move, copy, refactor, migrate, or merge any historical prototype. Migration is a separate task.
+`tmp/` is an immutable archive of historical experiments and reference implementations. Phase 1 ports the Fixed baseline into the real project directories without changing the archive.
