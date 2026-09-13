@@ -2,7 +2,7 @@
 
 ## Scope
 
-This document defines the Phase 2 source-neutral control boundary and the Phase 3A optional motion-warp extension. The compatibility target is the Phase 1 commit `f7e15a4c458293c9925139887a984ca5034de50f`, tagged `tfl-fixed-baseline`. Phase 3A adds one Qwen-inspired domain displacement response, disabled by default. It does not add Qwen press, ripple, glow or cellular behavior, Mobile behavior, or any intentional change to Fixed's optical output, lighting, presets and active interaction gains.
+This document defines the Phase 2 source-neutral control boundary and the Phase 3A/3B optional spatial-deformation extensions. The compatibility target is the Phase 1 commit `f7e15a4c458293c9925139887a984ca5034de50f`, tagged `tfl-fixed-baseline`. Phase 3A adds Qwen-inspired passive motion displacement. Phase 3B adds independently gated active press and drag displacement. All three new responses default off; the historical Fixed response defaults on. Neither phase adds Qwen ripples, glow or cellular behavior, Mobile behavior, or an intentional optical, lighting or preset change.
 
 The source-neutral entry point is `packages/tfl-engine/src/index.js`. The browser-only rendering integration is `packages/tfl-engine/src/browser.js`; it is the one package boundary that accepts canvas elements. DOM events, viewport rectangles, screen coordinates, local storage and animation-frame scheduling remain in TFL Lab.
 
@@ -101,7 +101,7 @@ Locks remain strict for GUI edits, presets, Mutate, Randomize, normal Reset, imp
 | `lighting` | `dt * temporal * lightMotion` | Canonical diagnostic/replay clock; not wired into Fixed lighting math yet. |
 | `events` | `dt` | Ages future transient events independently of visual temporal rate. |
 
-Pause freezes all four clocks and transient-event ages. Parameter smoothing continues while paused, preserving Fixed control behavior. TFL Lab's continuous influence strength and velocity release also continues while paused, preserving Fixed's release behavior. Resume continues from the stored clocks with no wall-time catch-up.
+Pause freezes all four clocks and transient-event ages. Parameter smoothing continues while paused, preserving Fixed control behavior. TFL Lab's continuous influence strength and velocity release continues while paused, as do the passive and active response releases driven by explicit `dt`. Resume continues from the stored clocks with no wall-time catch-up.
 
 The Fixed material still multiplies its animation time by the current flow and light rates internally. Using the separately integrated clocks in that shader would change phase during parameter transitions, so that visual change is deliberately deferred.
 
@@ -123,7 +123,7 @@ The engine stores one continuous source-neutral descriptor for the current Fixed
 
 `position` and `radius` use surface units; `velocity` uses surface units per second. `strength` is a nonnegative response amplitude. `engaged` expresses an active continuous source without naming a mouse button. `positionValid` allows Surface Probe to distinguish a located source from one outside the view.
 
-`setSpatialInfluence()` validates and copies this descriptor. TFL Lab translates pointer enter/down/move/up/leave into it and retains Fixed's attack, release and velocity-decay rates. Hover provides a position for the probe but strength stays zero, so it creates no visual disturbance. The Fixed compatibility layer converts the descriptor to the existing shader uniforms. Phase 2 does not add passive warp, press profiles, shear controls or new ripples.
+`setSpatialInfluence()` validates and copies this descriptor. TFL Lab translates pointer enter/down/move/up/leave into it and retains Fixed's attack, release and velocity-decay rates. Hover provides a position for the probe and for the optional Phase 3A motion response; its active `strength` target stays zero. `engaged` is the source-neutral gate used by Phase 3B. The Fixed compatibility layer converts the descriptor to the existing shader uniforms.
 
 ## Optional motion warp (Phase 3A)
 
@@ -154,6 +154,50 @@ The Fixed shader's structural coordinate has twice the canonical extent. The ren
 
 Diagnostics report the configured gain/radius, source speed, canonical displacement vector and its `effectiveStrength` magnitude after decay. Canvas2D fallback reports motion warp as unsupported; it does not fake domain movement with color or glow. Use the GPU Flow or Thickness view to assess structural movement. Surface Probe remains an approximate CPU mirror and does not reproduce this displacement.
 
+## Active press and drag deformation (Phase 3B)
+
+`setActiveDeformation(changes)` configures two responses to an engaged continuous spatial influence and controls whether the archived Fixed response reaches the renderer. The engine still receives only `position`, `velocity`, `strength`, `engaged` and related canonical influence fields. TFL Lab decides that a primary browser press sets `engaged`; the engine has no mouse-button or DOM concept.
+
+| Setting | Unit/range | Default |
+| --- | --- | --- |
+| `legacyFixedEnabled` | boolean | `true` |
+| `pressEnabled` | boolean | `false` |
+| `pressGain` | signed dimensionless, −2–2 | `1` |
+| `dragEnabled` | boolean | `false` |
+| `dragGain` | dimensionless, 0–2 | `1` |
+| `radius` | canonical surface units, 0.03–0.5 | `0.19` |
+
+The active amplitude is `clamp(strength / 1.55, 0, 1)` only while the influence is both located and engaged. An inactive influence therefore has zero target press and drag response, even if its velocity still represents passive motion. The stored responses release smoothly after disengagement and remain anchored at the last active position until their magnitudes settle to zero.
+
+Active Press produces a signed radial sample-coordinate offset:
+
+```text
+pressTarget = 0.075 * pressGain * activeAmplitude
+pressResponse = exponential approach(pressTarget, 18/s attack or 7/s release)
+radialSampleOffset = -normalize(samplePosition - influencePosition) * pressResponse
+```
+
+Positive gain samples toward the influence center; negative gain reverses the radial direction. This sign is explicit in the Lab control. The radial vector is zero exactly at the center and is multiplied by the shared Gaussian envelope.
+
+Active Drag converts canonical speed to bounded displacement:
+
+```text
+drive = smoothstep(0.05, 2.0, length(velocity))
+dragTarget = normalize(velocity) * 0.08 * dragGain * activeAmplitude * drive
+dragResponse = exponential approach(dragTarget, 20/s attack or 7/s release)
+dragSampleOffset = -dragResponse
+localSampleOffset = (dragSampleOffset + radialSampleOffset)
+                    * exp(-distance² / radius²)
+```
+
+`dragResponse` points in the requested visible material-motion direction. Rendering uses inverse sampling, so it subtracts that vector from the field coordinate; a feature then moves in the same direction as the canonical velocity. This distinction avoids presenting a same-sign UV offset that would move visible landmarks opposite to the drag.
+
+The Fixed structural coordinate spans twice the canonical extent, so the renderer multiplies `localSampleOffset` by two. It applies the result before Fixed flow scale, vortices, nested domain warp and procedural thickness generation. The Flow and Thickness diagnostic views therefore show structural landmark movement. The new code adds no scalar thickness, normal tilt, glow, light or color response. Existing normal taps evaluate the shifted structural coordinate but do not add a new deformation-Jacobian normal model.
+
+`legacyFixedEnabled` gates the complete existing Fixed input to its shader and Canvas fallback: late velocity push, thickness dent, scalar ripple/shear and explicit normal tilt remain in source but receive zero influence when the gate is off. This provides a direct comparison with the new spatial responses. The Lab's **Fixed baseline** button disables Passive Warp, Active Press and Active Drag and enables the legacy response. Default configuration already has that compatibility behavior.
+
+Active configuration is independent of motion-warp configuration, scene parameters and parameter locks. Presets, Mutate, Randomize and normal Reset do not change it. Factory Reset restores legacy Fixed on, both new active responses off, gains 1 and radius 0.19. Disabling an active component or setting its gain to zero clears that component immediately. Canvas2D reports active spatial deformation as unavailable. Surface Probe mirrors only the gated legacy approximation; it does not reproduce the new GPU displacement.
+
 ## Bounded transient events
 
 The neutral transient store has a default finite capacity of 16. Entries are explicitly active or inactive and contain type, canonical position, radius, strength, age, lifetime and allocation sequence.
@@ -177,9 +221,9 @@ Given the same initial snapshot, seeds, parameter transactions, influence/event 
 
 Snapshot schema version 2 stores requested/target parameters, locks, scene/render configuration, seeds and mutation sequence. Version 1 Phase 1 snapshots are accepted and migrated. Invalid known parameter values reject the snapshot before changing live state; unknown historical keys are ignored.
 
-Normal configuration snapshots exclude clocks, `current`, `effective`, continuous influence, motion-warp response and transient events. They include the motion-warp configuration under `interactions.motionWarp`. Applying one immediately settles validated parameter values as Fixed import/restore already did, respects live locks when `preserveLocks` is selected, and leaves live pause, clocks, influence and events alone.
+Normal configuration snapshots exclude clocks, `current`, `effective`, continuous influence, passive/active response state and transient events. They include passive configuration under `interactions.motionWarp` and active configuration under `interactions.activeDeformation`. Applying one immediately settles validated parameter values as Fixed import/restore already did, respects live locks when `preserveLocks` is selected, and leaves live pause, clocks, influence and events alone.
 
-`createSnapshot({ includeRuntime: true })` explicitly adds current/effective values, clocks, pause, influence, motion-warp response, transient store, viewport aspect, adaptive scale and effective quality. `restoreSnapshot(..., { restoreRuntime: true })` restores that state for deterministic replay and testing. TFL Lab persistence uses the normal configuration form.
+`createSnapshot({ includeRuntime: true })` explicitly adds current/effective values, clocks, pause, influence, passive and active responses, transient store, viewport aspect, adaptive scale and effective quality. `restoreSnapshot(..., { restoreRuntime: true })` restores that state for deterministic replay and testing. TFL Lab persistence uses the normal configuration form.
 
 ## Public boundary
 
@@ -188,7 +232,7 @@ The main `TflEngine` surface now covers:
 - lifecycle: `initialize`, `dispose`
 - validated controls: `setParameter`, `setParameters`, `applyPreset`, `mutate`, `randomize`, `reset`, `factoryReset`, locks and render settings
 - time: `advance`, `setPaused`, `togglePaused`
-- spatial control: `setViewport`, `setSpatialInfluence`, `clearSpatialInfluence`, `setMotionWarp`, `getMotionWarpConfiguration`
+- spatial control: `setViewport`, `setSpatialInfluence`, `clearSpatialInfluence`, `setMotionWarp`, `getMotionWarpConfiguration`, `setActiveDeformation`, `getActiveDeformationConfiguration`
 - timed infrastructure: `emitTransientEvent`, `clearTransientEvents`
 - rendering budget: quality, MSAA, adaptive mode, target FPS and `render`
 - inspection: `diagnostics`, `sampleSurface`
@@ -196,10 +240,10 @@ The main `TflEngine` surface now covers:
 
 The controller accepts a rendering-host interface rather than canvases. TFL Lab creates the browser host with its DOM canvases, then supplies that host to the engine. TFL Lab keeps `probe`, panel visibility and panel-collapse preferences in a separate application-state object; they are no longer properties of engine state. The UI reads engine state but sends every numeric change back through engine methods. The engine controller and its state/spatial/clock/event modules contain no PointerEvent, mouse-button, localStorage, keyboard, touch, MIDI or piano concepts.
 
-Diagnostics expose canonical influence values, all clocks, requested/current/effective scale, active transient count, lock count and the last transaction counts. `frameMs` remains the smoothed application frame interval; it is not labelled as GPU execution time.
+Diagnostics expose canonical influence values, passive response, active amplitude, press displacement, drag vector, all clocks, requested/current/effective scale, active transient count, lock count and the last transaction counts. `frameMs` remains the smoothed application frame interval; it is not labelled as GPU execution time.
 
 ## Fixed compatibility seam and deferred Phase 3 work
 
-Phase 2 made no shader formula or constant changes. Phase 3A adds only the gated, early coordinate displacement described above. With motion warp disabled, its uniform vector and gate are zero and the Fixed coordinate, field, active interaction, thickness, normal, optical and lighting calculations receive their prior values. Browser rendering still maps the original influence descriptor back to historical Fixed UV and UV/s immediately before those active-interaction uniforms are uploaded.
+Phase 2 made no shader formula or constant changes. Phase 3A adds only its gated early coordinate displacement. Phase 3B adds the separately zeroed active offset before the same structural stages. With Passive Warp, Active Press and Active Drag disabled and `legacyFixedEnabled` enabled, the new vectors/scalar are zero and the historical Fixed coordinates and influence uniforms receive their previous values. Browser rendering still maps the influence descriptor to historical Fixed UV and UV/s immediately before upload.
 
-Phase 3B and later work must intentionally add and independently gate active press displacement, new drag/shear behavior and timed ripple effects. It must decide how canonical flow/lighting clocks replace the Fixed master-clock multiplication, reconcile displaced normal sampling, and use transient events visually. Qwen glow/cells/ripples, Mobile membrane behavior and every active-interaction redesign remain absent.
+Phase 3C and later work must decide whether to add coordinate shear and timed ripple displacement, how canonical flow/lighting clocks replace the Fixed master-clock multiplication, and how a future normal architecture handles a deformation Jacobian. Qwen glow/cells/ripples, Mobile membrane behavior, touch gestures and persistent simulation remain absent.

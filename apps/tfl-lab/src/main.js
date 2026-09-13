@@ -182,6 +182,9 @@ async function boot() {
         : null,
       `input    pos <b>${diagnostic.influence.position.x.toFixed(3)}, ${diagnostic.influence.position.y.toFixed(3)}</b>  vel <b>${diagnostic.influence.velocity.x.toFixed(2)}, ${diagnostic.influence.velocity.y.toFixed(2)}</b>  strength <b>${diagnostic.influence.strength.toFixed(2)}</b>`,
       `warp     <b>${diagnostic.motionWarp.enabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.motionWarp.gain.toFixed(2)}</b>  radius <b>${diagnostic.motionWarp.radius.toFixed(2)}</b>  effect <b>${diagnostic.motionWarp.effectiveStrength.toFixed(4)} su</b>${diagnostic.capabilities?.motionWarp === false ? '  (GPU unavailable)' : ''}`,
+      `active   legacy <b>${diagnostic.activeDeformation.legacyFixedEnabled ? 'on' : 'off'}</b>  amplitude <b>${diagnostic.activeDeformation.sourceAmplitude.toFixed(2)}</b>  radius <b>${diagnostic.activeDeformation.radius.toFixed(2)}</b>`,
+      `press    <b>${diagnostic.activeDeformation.pressEnabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.activeDeformation.pressGain.toFixed(2)}</b>  effect <b>${diagnostic.activeDeformation.pressDisplacement.toFixed(4)} su</b>`,
+      `drag     <b>${diagnostic.activeDeformation.dragEnabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.activeDeformation.dragGain.toFixed(2)}</b>  vector <b>${diagnostic.activeDeformation.dragDisplacement.x.toFixed(4)}, ${diagnostic.activeDeformation.dragDisplacement.y.toFixed(4)} su</b>${diagnostic.capabilities?.activeDeformation === false ? '  (GPU unavailable)' : ''}`,
       `clocks   animation ${diagnostic.clocks.animation.toFixed(2)}  flow ${diagnostic.clocks.flow.toFixed(2)}  light ${diagnostic.clocks.lighting.toFixed(2)}  events ${diagnostic.clocks.events.toFixed(2)}`,
       `events   ${diagnostic.transientEventCount}/${diagnostic.transientCapacity}  locks ${diagnostic.lockCount}  tx ${diagnostic.lastTransaction.accepted}/${diagnostic.lastTransaction.skipped}/${diagnostic.lastTransaction.rejected}`,
       `mode     ${state.diag}${state.paused ? '  ·  PAUSED' : ''}`,
@@ -203,6 +206,24 @@ async function boot() {
       const report = engine.setMotionWarp(changes);
       if (report.changed) { app.ui?.sync(); persistSoon(); }
       return report;
+    },
+    activeDeformationConfiguration: () => engine.getActiveDeformationConfiguration(),
+    activeDeformation: (changes) => {
+      const report = engine.setActiveDeformation(changes);
+      if (report.changed) { app.ui?.sync(); persistSoon(); }
+      return report;
+    },
+    fixedInteractionBaseline: () => {
+      const passive = engine.setMotionWarp({ enabled: false });
+      const active = engine.setActiveDeformation({
+        legacyFixedEnabled: true,
+        pressEnabled: false,
+        dragEnabled: false,
+      });
+      if (passive.changed || active.changed) {
+        app.ui?.sync();
+        persistSoon();
+      }
     },
     preset: (name) => {
       if (engine.applyPreset(name).ok) { app.ui?.sync(); persistSoon(); }

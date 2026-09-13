@@ -123,6 +123,10 @@ export function createFilmMaterial(qualityName) {
     // W gates the optional response; zero is the exact Fixed-compatible path.
     uMotionWarp: uniform(new Vector4(0, 0, 0.19, 0)),
     uMotionWarpVector: uniform(new Vector2(0, 0)),
+    // Canonical active position/radius/press displacement and drag vector.
+    // Zero displacement is the exact Phase 3A-compatible path.
+    uActiveDeformation: uniform(new Vector4(0, 0, 0.19, 0)),
+    uActiveDragVector: uniform(new Vector2(0, 0)),
     uMode: uniform(0),
     uFlowSpeed: uniform(1), uFlowScale: uniform(1.3),
     uTurb: uniform(1), uWarp: uniform(1.1), uVort: uniform(1),
@@ -210,7 +214,27 @@ export function createFilmMaterial(qualityName) {
       .mul(U.uMotionWarp.w);
     const st = fixedSt.add(U.uMotionWarpVector.mul(motionEnvelope.mul(2.0)));
 
-    const pack0 = advected(st);
+    // Active deformation is also applied before Fixed flow, vortices, nested
+    // warp and film structure. Positive radial displacement samples inward.
+    // The stored drag vector follows influence velocity, so sampling subtracts
+    // it and visible structural landmarks follow the drag direction. Neither
+    // component adds film thickness, light or color.
+    const activeDelta = fixedSt.mul(0.5).sub(U.uActiveDeformation.xy);
+    const activeDistance = sqrt(activeDelta.dot(activeDelta));
+    const activeDirection = activeDelta.div(max(activeDistance, 0.0001));
+    const activeRadius2 = max(
+      U.uActiveDeformation.z.mul(U.uActiveDeformation.z),
+      0.0009,
+    );
+    const activeEnvelope = exp(
+      activeDelta.dot(activeDelta).div(activeRadius2).negate(),
+    );
+    const activeOffset = U.uActiveDragVector.negate()
+      .sub(activeDirection.mul(U.uActiveDeformation.w))
+      .mul(activeEnvelope.mul(2.0));
+    const structuralSt = st.add(activeOffset);
+
+    const pack0 = advected(structuralSt);
     // Pointer push: velocity advects coordinates near the cursor.
     const pd = fullUv.sub(U.uPointer.xy);
     // Screen-space metric: UV x spans `aspect` times more pixels than UV y.
@@ -244,33 +268,33 @@ export function createFilmMaterial(qualityName) {
     let gx, gy;
     if (Q.central) {
       const hx1 = toNm(thicknessAt({
-        adv: advected(st.add(ex)).adv, warp: pack0.warp, drift: pack0.drift,
+        adv: advected(structuralSt.add(ex)).adv, warp: pack0.warp, drift: pack0.drift,
       }, false, true).field);
       const hx0 = toNm(thicknessAt({
-        adv: advected(st.sub(ex)).adv, warp: pack0.warp, drift: pack0.drift,
+        adv: advected(structuralSt.sub(ex)).adv, warp: pack0.warp, drift: pack0.drift,
       }, false, true).field);
       const hy1 = toNm(thicknessAt({
-        adv: advected(st.add(ey)).adv, warp: pack0.warp, drift: pack0.drift,
+        adv: advected(structuralSt.add(ey)).adv, warp: pack0.warp, drift: pack0.drift,
       }, false, true).field);
       const hy0 = toNm(thicknessAt({
-        adv: advected(st.sub(ey)).adv, warp: pack0.warp, drift: pack0.drift,
+        adv: advected(structuralSt.sub(ey)).adv, warp: pack0.warp, drift: pack0.drift,
       }, false, true).field);
       gx = hx1.sub(hx0).div(eps.mul(2.0).mul(NM_GAIN));
       gy = hy1.sub(hy0).div(eps.mul(2.0).mul(NM_GAIN));
     } else {
       const hx1 = toNm(thicknessAt({
-        adv: advected(st.add(ex)).adv, warp: pack0.warp, drift: pack0.drift,
+        adv: advected(structuralSt.add(ex)).adv, warp: pack0.warp, drift: pack0.drift,
       }, false, true).field);
       const hy1 = toNm(thicknessAt({
-        adv: advected(st.add(ey)).adv, warp: pack0.warp, drift: pack0.drift,
+        adv: advected(structuralSt.add(ey)).adv, warp: pack0.warp, drift: pack0.drift,
       }, false, true).field);
       gx = hx1.sub(h).div(eps.mul(NM_GAIN));
       gy = hy1.sub(h).div(eps.mul(NM_GAIN));
     }
     let N = normalize(vec3(gx.mul(gradScale.negate()), gy.mul(gradScale.negate()), float(1.0)));
     if (Q.micro > 0) {
-      const m1 = vnoise(st.mul(47.0).add(U.uTime.mul(0.35))).sub(0.5);
-      const m2 = vnoise(st.mul(59.0).sub(vec2(U.uTime.mul(0.3), 0.0))).sub(0.5);
+      const m1 = vnoise(structuralSt.mul(47.0).add(U.uTime.mul(0.35))).sub(0.5);
+      const m2 = vnoise(structuralSt.mul(59.0).sub(vec2(U.uTime.mul(0.3), 0.0))).sub(0.5);
       N = normalize(N.add(vec3(m1, m2, float(0.0)).mul(U.uFine.mul(0.13))));
     }
     // The pointer must deform the apparent surface, not only change film
@@ -386,6 +410,17 @@ export function updateUniforms(U, s, env) {
   U.uMotionWarpVector.value.set(
     motionEnabled ? motionWarp.displacement.x : 0,
     motionEnabled ? motionWarp.displacement.y : 0,
+  );
+  const active = env.activeDeformation;
+  U.uActiveDeformation.value.set(
+    active?.position?.x ?? 0,
+    active?.position?.y ?? 0,
+    active?.radius ?? 0.19,
+    active?.pressDisplacement ?? 0,
+  );
+  U.uActiveDragVector.value.set(
+    active?.dragDisplacement?.x ?? 0,
+    active?.dragDisplacement?.y ?? 0,
   );
   U.uMode.value = env.mode;
   U.uFlowSpeed.value = s.flowSpeed;

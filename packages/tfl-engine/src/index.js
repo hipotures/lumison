@@ -32,6 +32,20 @@ export {
 export { adaptiveTick, createAdaptive, createPerf, perfTick } from './perf.js';
 export { advanceClocks, CLOCK_NAMES, createClocks } from './clocks.js';
 export {
+  ACTIVE_DEFORMATION_CALIBRATION,
+  ACTIVE_DEFORMATION_DEFAULTS,
+  ACTIVE_DEFORMATION_LIMITS,
+  activeDeformationConfiguration,
+  activeDeformationDisplacementAt,
+  activeDeformationRenderState,
+  activeDragDriveForSpeed,
+  advanceActiveDeformation,
+  configureActiveDeformation,
+  createActiveDeformationState,
+  restoreActiveDeformationRuntime,
+  snapshotActiveDeformationRuntime,
+} from './active-deformation.js';
+export {
   advanceMotionWarp,
   configureMotionWarp,
   createMotionWarpState,

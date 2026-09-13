@@ -1,6 +1,6 @@
 # Lumison
 
-Lumison is a planned piano/MIDI-driven audiovisual application powered by a shared thin-film visual engine. The repository currently includes the Fixed-compatible TFL Lab behind canonical state, coordinate, timing and source-neutral control boundaries, plus the optional Phase 3A passive motion warp. Passive Warp is experimental and defaults to off.
+Lumison is a planned piano/MIDI-driven audiovisual application powered by a shared thin-film visual engine. The repository currently includes the Fixed-compatible TFL Lab behind canonical state, coordinate, timing and source-neutral control boundaries, plus optional Phase 3A passive motion warp and Phase 3B active press/drag displacement. All new spatial responses are experimental and default to off.
 
 - `apps/tfl-lab/`: standalone Thin-Film Lab with the Fixed control panel, pointer adapter, persistence, diagnostics, presets and mutation actions.
 - `apps/lumison/`: piano/MIDI application, eventually interpreting performance, maintaining musical state/memory, and mapping it to engine actions without depending on the TFL Lab GUI.

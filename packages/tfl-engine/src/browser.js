@@ -42,9 +42,13 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
       }
     },
 
-    render({ state, influence, motionWarp, renderScale }) {
+    render({ state, influence, motionWarp, activeDeformation, renderScale }) {
       const aspect = logicalAspect();
-      const fixedInfluence = canonicalInfluenceToFixed(influence, aspect);
+      const fixedInfluence = canonicalInfluenceToFixed(
+        influence,
+        aspect,
+        { enabled: activeDeformation?.legacyFixedEnabled !== false },
+      );
       try {
         if (host.renderer && host.stage) {
           try { host.renderer.info?.reset?.(); } catch { /* statistics only */ }
@@ -54,8 +58,13 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
             aspect: fittedAspect,
             bufW: fit.bufW,
             bufH: fit.bufH,
-            pointer: canonicalInfluenceToFixed(influence, fittedAspect),
+            pointer: canonicalInfluenceToFixed(
+              influence,
+              fittedAspect,
+              { enabled: activeDeformation?.legacyFixedEnabled !== false },
+            ),
             motionWarp,
+            activeDeformation,
           });
           host.renderer.render(host.stage.scene, host.stage.camera);
           return { aspect: fittedAspect };
@@ -97,6 +106,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
         stats: rendererStats(host.renderer),
         capabilities: {
           motionWarp: Boolean(host.renderer && host.stage),
+          activeDeformation: Boolean(host.renderer && host.stage),
         },
       };
     },

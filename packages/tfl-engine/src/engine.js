@@ -3,6 +3,15 @@
 // independent of DOM and browser input semantics.
 import { advanceClocks } from './clocks.js';
 import {
+  activeDeformationConfiguration,
+  activeDeformationRenderState,
+  advanceActiveDeformation,
+  configureActiveDeformation,
+  createActiveDeformationState,
+  restoreActiveDeformationRuntime,
+  snapshotActiveDeformationRuntime,
+} from './active-deformation.js';
+import {
   advanceMotionWarp,
   configureMotionWarp,
   createMotionWarpState,
@@ -61,6 +70,7 @@ export class TflEngine {
     this.adaptiveScale = state.requested.renderScale;
     this.influence = createSpatialInfluence();
     this.motionWarp = createMotionWarpState();
+    this.activeDeformation = createActiveDeformationState();
     this.events = createTransientStore(eventCapacity);
     this.viewport = { aspect: 1 };
     this.lastProbeTime = -Infinity;
@@ -155,6 +165,7 @@ export class TflEngine {
     this.adaptive = createAdaptive();
     this.influence = createSpatialInfluence();
     this.motionWarp = createMotionWarpState();
+    this.activeDeformation = createActiveDeformationState();
     this.events = createTransientStore(this.events.capacity);
     this.#rebuildQuality();
     return report;
@@ -234,6 +245,14 @@ export class TflEngine {
     return motionWarpConfiguration(this.motionWarp);
   }
 
+  setActiveDeformation(changes) {
+    return configureActiveDeformation(this.activeDeformation, changes);
+  }
+
+  getActiveDeformationConfiguration() {
+    return activeDeformationConfiguration(this.activeDeformation);
+  }
+
   emitTransientEvent(event) {
     return addTransientEvent(this.events, event);
   }
@@ -250,6 +269,7 @@ export class TflEngine {
     // Continuous response follows explicit application dt even while the
     // animation clocks are paused, matching Fixed's influence-release policy.
     advanceMotionWarp(this.motionWarp, this.influence, dt);
+    advanceActiveDeformation(this.activeDeformation, this.influence, dt);
     perfTick(this.perf, dt * 1000);
     const scale = this.state.adaptive
       ? this.adaptiveScale
@@ -284,6 +304,7 @@ export class TflEngine {
       state: this.state,
       influence: this.influence,
       motionWarp: motionWarpRenderState(this.motionWarp),
+      activeDeformation: activeDeformationRenderState(this.activeDeformation),
       renderScale: this.state.effective.renderScale,
     });
     if (result?.aspect) this.viewport.aspect = normalizeAspect(result.aspect);
@@ -299,6 +320,7 @@ export class TflEngine {
     const saved = createSnapshot(this.state, { includeRuntime });
     saved.interactions = {
       motionWarp: motionWarpConfiguration(this.motionWarp),
+      activeDeformation: activeDeformationConfiguration(this.activeDeformation),
     };
     if (includeRuntime) {
       saved.runtime.influence = cloneInfluence(this.influence);
@@ -307,6 +329,7 @@ export class TflEngine {
       saved.runtime.effectiveQuality = this.effectiveQuality;
       saved.runtime.adaptiveScale = this.adaptiveScale;
       saved.runtime.motionWarp = snapshotMotionWarpRuntime(this.motionWarp);
+      saved.runtime.activeDeformation = snapshotActiveDeformationRuntime(this.activeDeformation);
     }
     return saved;
   }
@@ -315,12 +338,24 @@ export class TflEngine {
     let restoredEvents = null;
     let restoredInfluence = null;
     let restoredMotionWarp = null;
+    let restoredActiveDeformation = null;
     const savedMotionWarp = saved?.interactions?.motionWarp;
     if (savedMotionWarp !== undefined) {
       restoredMotionWarp = createMotionWarpState();
       const motionReport = configureMotionWarp(restoredMotionWarp, savedMotionWarp);
       if (!motionReport.ok || motionReport.accepted.length !== 3) {
         return { ok: false, reason: 'invalid-motion-warp-configuration' };
+      }
+    }
+    const savedActiveDeformation = saved?.interactions?.activeDeformation;
+    if (savedActiveDeformation !== undefined) {
+      restoredActiveDeformation = createActiveDeformationState();
+      const activeReport = configureActiveDeformation(
+        restoredActiveDeformation,
+        savedActiveDeformation,
+      );
+      if (!activeReport.ok || activeReport.accepted.length !== 6) {
+        return { ok: false, reason: 'invalid-active-deformation-configuration' };
       }
     }
     if (options.restoreRuntime) {
@@ -344,6 +379,16 @@ export class TflEngine {
         }
         restoredMotionWarp = target;
       }
+      if (saved?.runtime?.activeDeformation !== undefined) {
+        const target = restoredActiveDeformation
+          ?? createActiveDeformationState(
+            activeDeformationConfiguration(this.activeDeformation),
+          );
+        if (!restoreActiveDeformationRuntime(target, saved.runtime.activeDeformation)) {
+          return { ok: false, reason: 'invalid-active-deformation-runtime' };
+        }
+        restoredActiveDeformation = target;
+      }
     }
     const result = applySnapshot(this.state, saved, options);
     if (!result.ok) return result;
@@ -365,6 +410,7 @@ export class TflEngine {
       this.viewport.aspect = normalizeAspect(saved.runtime?.viewport?.aspect);
     }
     if (restoredMotionWarp) this.motionWarp = restoredMotionWarp;
+    if (restoredActiveDeformation) this.activeDeformation = restoredActiveDeformation;
     this.#rebuildQuality();
     return result;
   }
@@ -375,7 +421,9 @@ export class TflEngine {
       if (now - this.lastProbeTime < minIntervalSeconds) return 'throttled';
       this.lastProbeTime = now;
     }
-    const fixed = canonicalInfluenceToFixed(this.influence, this.viewport.aspect);
+    const fixed = canonicalInfluenceToFixed(this.influence, this.viewport.aspect, {
+      enabled: this.activeDeformation.configuration.legacyFixedEnabled,
+    });
     const sample = sampleSurface(fixed, this.state.current, this.state.clocks.animation);
     if (!sample || sample === 'throttled') return sample;
     return {
@@ -416,6 +464,7 @@ export class TflEngine {
       clocks: { ...this.state.clocks },
       influence: cloneInfluence(this.influence),
       motionWarp: motionWarpRenderState(this.motionWarp),
+      activeDeformation: activeDeformationRenderState(this.activeDeformation),
       transientEventCount: activeTransientCount(this.events),
       transientCapacity: this.events.capacity,
       lockCount: Object.keys(this.state.locks).length,

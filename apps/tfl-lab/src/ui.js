@@ -114,9 +114,20 @@ export function buildUI(root, state, labState, A) {
     sliders[name] = { input, output: out, lock, step };
   }
 
-  // ---- optional source-neutral motion response ----
+  // ---- optional source-neutral spatial responses ----
   const interaction = sections.interaction;
   const initialMotionWarp = A.motionWarpConfiguration();
+  const initialActiveDeformation = A.activeDeformationConfiguration();
+  const baselineButton = el('button', 'btn small', 'Fixed baseline');
+  baselineButton.addEventListener('click', () => A.fixedInteractionBaseline());
+  const baselineRow = el('div', 'btn-row');
+  baselineRow.append(baselineButton);
+  interaction.append(baselineRow);
+  interaction.append(toggleRow(
+    'Legacy Fixed response',
+    initialActiveDeformation.legacyFixedEnabled,
+    (legacyFixedEnabled) => A.activeDeformation({ legacyFixedEnabled }),
+  ));
   interaction.append(toggleRow(
     'Passive Warp',
     initialMotionWarp.enabled,
@@ -133,6 +144,33 @@ export function buildUI(root, state, labState, A) {
   interaction.append(passiveGain.root, passiveRadius.root);
   interaction.append(hint(
     'Optional GPU domain displacement from motion. Off preserves the Fixed hover baseline; Canvas2D cannot reproduce this structural effect.',
+  ));
+  interaction.append(toggleRow(
+    'Active Press',
+    initialActiveDeformation.pressEnabled,
+    (pressEnabled) => A.activeDeformation({ pressEnabled }),
+  ));
+  const activePressGain = rangeRow(
+    'Press Gain (+ inward)', -2, 2, 0.05, initialActiveDeformation.pressGain,
+    (pressGain) => A.activeDeformation({ pressGain }),
+  );
+  interaction.append(activePressGain.root);
+  interaction.append(toggleRow(
+    'Active Drag',
+    initialActiveDeformation.dragEnabled,
+    (dragEnabled) => A.activeDeformation({ dragEnabled }),
+  ));
+  const activeDragGain = rangeRow(
+    'Drag Gain', 0, 2, 0.05, initialActiveDeformation.dragGain,
+    (dragGain) => A.activeDeformation({ dragGain }),
+  );
+  const activeRadius = rangeRow(
+    'Active Radius', 0.03, 0.5, 0.01, initialActiveDeformation.radius,
+    (radius) => A.activeDeformation({ radius }),
+  );
+  interaction.append(activeDragGain.root, activeRadius.root);
+  interaction.append(hint(
+    'Press and Drag move structural coordinates only while the influence is active. Negative Press Gain reverses the radial sampling direction. Disable Legacy Fixed response to inspect the new spatial response alone.',
   ));
 
   // ---- rendering extras ----
@@ -262,6 +300,19 @@ export function buildUI(root, state, labState, A) {
     passiveGain.output.textContent = formatNum(motionWarp.gain, 0.05);
     passiveRadius.input.value = String(motionWarp.radius);
     passiveRadius.output.textContent = formatNum(motionWarp.radius, 0.01);
+    const active = A.activeDeformationConfiguration();
+    const legacy = root.querySelector('input[aria-label="Legacy Fixed response"]');
+    if (legacy) legacy.checked = active.legacyFixedEnabled;
+    const press = root.querySelector('input[aria-label="Active Press"]');
+    if (press) press.checked = active.pressEnabled;
+    activePressGain.input.value = String(active.pressGain);
+    activePressGain.output.textContent = formatNum(active.pressGain, 0.05);
+    const drag = root.querySelector('input[aria-label="Active Drag"]');
+    if (drag) drag.checked = active.dragEnabled;
+    activeDragGain.input.value = String(active.dragGain);
+    activeDragGain.output.textContent = formatNum(active.dragGain, 0.05);
+    activeRadius.input.value = String(active.radius);
+    activeRadius.output.textContent = formatNum(active.radius, 0.01);
     const pr = root.querySelector('input[aria-label="Surface probe"]');
     if (pr) pr.checked = labState.probe;
     pauseBtn.textContent = state.paused ? '▶' : '⏸';

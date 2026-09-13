@@ -159,12 +159,12 @@ export function advanceInfluenceDynamics(influence, dt, {
 
 // Explicit Fixed compatibility seam. The shader continues to receive its
 // historical UV position and UV/second velocity without changing any gain.
-export function canonicalInfluenceToFixed(influence, aspect = 1) {
+export function canonicalInfluenceToFixed(influence, aspect = 1, { enabled = true } = {}) {
   const safe = sanitizeSpatialInfluence(influence);
   const value = safe.ok ? safe.value : createSpatialInfluence();
   const a = normalizeAspect(aspect);
   const uv = surfaceToNormalizedViewport(value.position, a);
-  return {
+  const fixed = {
     x: uv.x,
     y: 1 - uv.y,
     vx: value.velocity.x / a,
@@ -173,4 +173,10 @@ export function canonicalInfluenceToFixed(influence, aspect = 1) {
     strength: value.strength,
     active: value.positionValid,
   };
+  if (!enabled) {
+    fixed.vx = 0;
+    fixed.vy = 0;
+    fixed.strength = 0;
+  }
+  return fixed;
 }
