@@ -150,6 +150,7 @@ export function pushFrameUniforms(stage, state, env) {
     pointer: env.pointer,
     motionWarp: env.motionWarp,
     activeDeformation: env.activeDeformation,
+    coordinateShear: env.coordinateShear,
     mode: DIAG_MODES.indexOf(state.diag),
   });
 }

@@ -12,6 +12,15 @@ import {
   snapshotActiveDeformationRuntime,
 } from './active-deformation.js';
 import {
+  advanceCoordinateShear,
+  configureCoordinateShear,
+  coordinateShearConfiguration,
+  coordinateShearRenderState,
+  createCoordinateShearState,
+  restoreCoordinateShearRuntime,
+  snapshotCoordinateShearRuntime,
+} from './coordinate-shear.js';
+import {
   advanceMotionWarp,
   configureMotionWarp,
   createMotionWarpState,
@@ -71,6 +80,7 @@ export class TflEngine {
     this.influence = createSpatialInfluence();
     this.motionWarp = createMotionWarpState();
     this.activeDeformation = createActiveDeformationState();
+    this.coordinateShear = createCoordinateShearState();
     this.events = createTransientStore(eventCapacity);
     this.viewport = { aspect: 1 };
     this.lastProbeTime = -Infinity;
@@ -166,6 +176,7 @@ export class TflEngine {
     this.influence = createSpatialInfluence();
     this.motionWarp = createMotionWarpState();
     this.activeDeformation = createActiveDeformationState();
+    this.coordinateShear = createCoordinateShearState();
     this.events = createTransientStore(this.events.capacity);
     this.#rebuildQuality();
     return report;
@@ -253,6 +264,14 @@ export class TflEngine {
     return activeDeformationConfiguration(this.activeDeformation);
   }
 
+  setCoordinateShear(changes) {
+    return configureCoordinateShear(this.coordinateShear, changes);
+  }
+
+  getCoordinateShearConfiguration() {
+    return coordinateShearConfiguration(this.coordinateShear);
+  }
+
   emitTransientEvent(event) {
     return addTransientEvent(this.events, event);
   }
@@ -270,6 +289,7 @@ export class TflEngine {
     // animation clocks are paused, matching Fixed's influence-release policy.
     advanceMotionWarp(this.motionWarp, this.influence, dt);
     advanceActiveDeformation(this.activeDeformation, this.influence, dt);
+    advanceCoordinateShear(this.coordinateShear, this.influence, dt);
     perfTick(this.perf, dt * 1000);
     const scale = this.state.adaptive
       ? this.adaptiveScale
@@ -305,6 +325,10 @@ export class TflEngine {
       influence: this.influence,
       motionWarp: motionWarpRenderState(this.motionWarp),
       activeDeformation: activeDeformationRenderState(this.activeDeformation),
+      coordinateShear: coordinateShearRenderState(
+        this.coordinateShear,
+        this.activeDeformation.configuration.radius,
+      ),
       renderScale: this.state.effective.renderScale,
     });
     if (result?.aspect) this.viewport.aspect = normalizeAspect(result.aspect);
@@ -321,6 +345,7 @@ export class TflEngine {
     saved.interactions = {
       motionWarp: motionWarpConfiguration(this.motionWarp),
       activeDeformation: activeDeformationConfiguration(this.activeDeformation),
+      coordinateShear: coordinateShearConfiguration(this.coordinateShear),
     };
     if (includeRuntime) {
       saved.runtime.influence = cloneInfluence(this.influence);
@@ -330,6 +355,7 @@ export class TflEngine {
       saved.runtime.adaptiveScale = this.adaptiveScale;
       saved.runtime.motionWarp = snapshotMotionWarpRuntime(this.motionWarp);
       saved.runtime.activeDeformation = snapshotActiveDeformationRuntime(this.activeDeformation);
+      saved.runtime.coordinateShear = snapshotCoordinateShearRuntime(this.coordinateShear);
     }
     return saved;
   }
@@ -339,6 +365,7 @@ export class TflEngine {
     let restoredInfluence = null;
     let restoredMotionWarp = null;
     let restoredActiveDeformation = null;
+    let restoredCoordinateShear = null;
     const savedMotionWarp = saved?.interactions?.motionWarp;
     if (savedMotionWarp !== undefined) {
       restoredMotionWarp = createMotionWarpState();
@@ -356,6 +383,17 @@ export class TflEngine {
       );
       if (!activeReport.ok || activeReport.accepted.length !== 6) {
         return { ok: false, reason: 'invalid-active-deformation-configuration' };
+      }
+    }
+    const savedCoordinateShear = saved?.interactions?.coordinateShear;
+    if (savedCoordinateShear !== undefined) {
+      restoredCoordinateShear = createCoordinateShearState();
+      const shearReport = configureCoordinateShear(
+        restoredCoordinateShear,
+        savedCoordinateShear,
+      );
+      if (!shearReport.ok || shearReport.accepted.length !== 2) {
+        return { ok: false, reason: 'invalid-coordinate-shear-configuration' };
       }
     }
     if (options.restoreRuntime) {
@@ -389,6 +427,16 @@ export class TflEngine {
         }
         restoredActiveDeformation = target;
       }
+      if (saved?.runtime?.coordinateShear !== undefined) {
+        const target = restoredCoordinateShear
+          ?? createCoordinateShearState(
+            coordinateShearConfiguration(this.coordinateShear),
+          );
+        if (!restoreCoordinateShearRuntime(target, saved.runtime.coordinateShear)) {
+          return { ok: false, reason: 'invalid-coordinate-shear-runtime' };
+        }
+        restoredCoordinateShear = target;
+      }
     }
     const result = applySnapshot(this.state, saved, options);
     if (!result.ok) return result;
@@ -411,6 +459,7 @@ export class TflEngine {
     }
     if (restoredMotionWarp) this.motionWarp = restoredMotionWarp;
     if (restoredActiveDeformation) this.activeDeformation = restoredActiveDeformation;
+    if (restoredCoordinateShear) this.coordinateShear = restoredCoordinateShear;
     this.#rebuildQuality();
     return result;
   }
@@ -465,6 +514,10 @@ export class TflEngine {
       influence: cloneInfluence(this.influence),
       motionWarp: motionWarpRenderState(this.motionWarp),
       activeDeformation: activeDeformationRenderState(this.activeDeformation),
+      coordinateShear: coordinateShearRenderState(
+        this.coordinateShear,
+        this.activeDeformation.configuration.radius,
+      ),
       transientEventCount: activeTransientCount(this.events),
       transientCapacity: this.events.capacity,
       lockCount: Object.keys(this.state.locks).length,

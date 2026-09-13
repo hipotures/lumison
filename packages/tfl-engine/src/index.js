@@ -46,6 +46,20 @@ export {
   snapshotActiveDeformationRuntime,
 } from './active-deformation.js';
 export {
+  advanceCoordinateShear,
+  configureCoordinateShear,
+  COORDINATE_SHEAR_CALIBRATION,
+  COORDINATE_SHEAR_DEFAULTS,
+  COORDINATE_SHEAR_LIMITS,
+  coordinateShearConfiguration,
+  coordinateShearDisplacementAt,
+  coordinateShearDriveForSpeed,
+  coordinateShearRenderState,
+  createCoordinateShearState,
+  restoreCoordinateShearRuntime,
+  snapshotCoordinateShearRuntime,
+} from './coordinate-shear.js';
+export {
   advanceMotionWarp,
   configureMotionWarp,
   createMotionWarpState,

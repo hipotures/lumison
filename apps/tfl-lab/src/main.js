@@ -185,6 +185,7 @@ async function boot() {
       `active   legacy <b>${diagnostic.activeDeformation.legacyFixedEnabled ? 'on' : 'off'}</b>  amplitude <b>${diagnostic.activeDeformation.sourceAmplitude.toFixed(2)}</b>  radius <b>${diagnostic.activeDeformation.radius.toFixed(2)}</b>`,
       `press    <b>${diagnostic.activeDeformation.pressEnabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.activeDeformation.pressGain.toFixed(2)}</b>  effect <b>${diagnostic.activeDeformation.pressDisplacement.toFixed(4)} su</b>`,
       `drag     <b>${diagnostic.activeDeformation.dragEnabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.activeDeformation.dragGain.toFixed(2)}</b>  vector <b>${diagnostic.activeDeformation.dragDisplacement.x.toFixed(4)}, ${diagnostic.activeDeformation.dragDisplacement.y.toFixed(4)} su</b>${diagnostic.capabilities?.activeDeformation === false ? '  (GPU unavailable)' : ''}`,
+      `shear    <b>${diagnostic.coordinateShear.enabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.coordinateShear.gain.toFixed(2)}</b>  speed <b>${diagnostic.coordinateShear.sourceSpeed.toFixed(2)} su/s</b>  vector <b>${diagnostic.coordinateShear.displacement.x.toFixed(4)}, ${diagnostic.coordinateShear.displacement.y.toFixed(4)} su</b>${diagnostic.capabilities?.coordinateShear === false ? '  (GPU unavailable)' : ''}`,
       `clocks   animation ${diagnostic.clocks.animation.toFixed(2)}  flow ${diagnostic.clocks.flow.toFixed(2)}  light ${diagnostic.clocks.lighting.toFixed(2)}  events ${diagnostic.clocks.events.toFixed(2)}`,
       `events   ${diagnostic.transientEventCount}/${diagnostic.transientCapacity}  locks ${diagnostic.lockCount}  tx ${diagnostic.lastTransaction.accepted}/${diagnostic.lastTransaction.skipped}/${diagnostic.lastTransaction.rejected}`,
       `mode     ${state.diag}${state.paused ? '  ·  PAUSED' : ''}`,
@@ -213,6 +214,12 @@ async function boot() {
       if (report.changed) { app.ui?.sync(); persistSoon(); }
       return report;
     },
+    coordinateShearConfiguration: () => engine.getCoordinateShearConfiguration(),
+    coordinateShear: (changes) => {
+      const report = engine.setCoordinateShear(changes);
+      if (report.changed) { app.ui?.sync(); persistSoon(); }
+      return report;
+    },
     fixedInteractionBaseline: () => {
       const passive = engine.setMotionWarp({ enabled: false });
       const active = engine.setActiveDeformation({
@@ -220,7 +227,8 @@ async function boot() {
         pressEnabled: false,
         dragEnabled: false,
       });
-      if (passive.changed || active.changed) {
+      const shear = engine.setCoordinateShear({ enabled: false });
+      if (passive.changed || active.changed || shear.changed) {
         app.ui?.sync();
         persistSoon();
       }

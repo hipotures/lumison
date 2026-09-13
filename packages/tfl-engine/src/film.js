@@ -127,6 +127,10 @@ export function createFilmMaterial(qualityName) {
     // Zero displacement is the exact Phase 3A-compatible path.
     uActiveDeformation: uniform(new Vector4(0, 0, 0.19, 0)),
     uActiveDragVector: uniform(new Vector2(0, 0)),
+    // Canonical center/radius/gate and the bounded coefficients for a local
+    // off-diagonal coordinate shear. A zero vector preserves Phase 3B.
+    uCoordinateShear: uniform(new Vector4(0, 0, 0.19, 0)),
+    uCoordinateShearVector: uniform(new Vector2(0, 0)),
     uMode: uniform(0),
     uFlowSpeed: uniform(1), uFlowScale: uniform(1.3),
     uTurb: uniform(1), uWarp: uniform(1.1), uVort: uniform(1),
@@ -232,7 +236,25 @@ export function createFilmMaterial(qualityName) {
     const activeOffset = U.uActiveDragVector.negate()
       .sub(activeDirection.mul(U.uActiveDeformation.w))
       .mul(activeEnvelope.mul(2.0));
-    const structuralSt = st.add(activeOffset);
+    // Real coordinate shear: local Y drives X displacement and local X drives
+    // Y displacement. This is an off-diagonal transform, distinct from Active
+    // Drag's uniform local translation and Fixed's late scalar thickness term.
+    // Normalized cross-axis coordinates and a Gaussian envelope keep the
+    // transform bounded at the center, radius edge and fast input speeds.
+    const shearDelta = fixedSt.mul(0.5).sub(U.uCoordinateShear.xy);
+    const shearRadius = max(U.uCoordinateShear.z, 0.03);
+    const shearEnvelope = exp(
+      shearDelta.dot(shearDelta).div(shearRadius.mul(shearRadius)).negate(),
+    ).mul(U.uCoordinateShear.w);
+    const shearCross = vec2(
+      clamp(shearDelta.y.div(shearRadius), -1.0, 1.0),
+      clamp(shearDelta.x.div(shearRadius), -1.0, 1.0),
+    );
+    const shearOffset = vec2(
+      U.uCoordinateShearVector.x.mul(shearCross.x),
+      U.uCoordinateShearVector.y.mul(shearCross.y),
+    ).negate().mul(shearEnvelope.mul(2.0));
+    const structuralSt = st.add(activeOffset).add(shearOffset);
 
     const pack0 = advected(structuralSt);
     // Pointer push: velocity advects coordinates near the cursor.
@@ -421,6 +443,18 @@ export function updateUniforms(U, s, env) {
   U.uActiveDragVector.value.set(
     active?.dragDisplacement?.x ?? 0,
     active?.dragDisplacement?.y ?? 0,
+  );
+  const shear = env.coordinateShear;
+  const shearEnabled = shear?.enabled === true && shear.effectiveStrength > 0;
+  U.uCoordinateShear.value.set(
+    shear?.position?.x ?? 0,
+    shear?.position?.y ?? 0,
+    shear?.radius ?? 0.19,
+    shearEnabled ? 1 : 0,
+  );
+  U.uCoordinateShearVector.value.set(
+    shearEnabled ? shear.displacement.x : 0,
+    shearEnabled ? shear.displacement.y : 0,
   );
   U.uMode.value = env.mode;
   U.uFlowSpeed.value = s.flowSpeed;

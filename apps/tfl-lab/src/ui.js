@@ -118,13 +118,14 @@ export function buildUI(root, state, labState, A) {
   const interaction = sections.interaction;
   const initialMotionWarp = A.motionWarpConfiguration();
   const initialActiveDeformation = A.activeDeformationConfiguration();
+  const initialCoordinateShear = A.coordinateShearConfiguration();
   const baselineButton = el('button', 'btn small', 'Fixed baseline');
   baselineButton.addEventListener('click', () => A.fixedInteractionBaseline());
   const baselineRow = el('div', 'btn-row');
   baselineRow.append(baselineButton);
   interaction.append(baselineRow);
   interaction.append(toggleRow(
-    'Legacy Fixed response',
+    'Legacy Fixed response (includes thickness shear)',
     initialActiveDeformation.legacyFixedEnabled,
     (legacyFixedEnabled) => A.activeDeformation({ legacyFixedEnabled }),
   ));
@@ -169,8 +170,18 @@ export function buildUI(root, state, labState, A) {
     (radius) => A.activeDeformation({ radius }),
   );
   interaction.append(activeDragGain.root, activeRadius.root);
+  interaction.append(toggleRow(
+    'Coordinate Shear',
+    initialCoordinateShear.enabled,
+    (enabled) => A.coordinateShear({ enabled }),
+  ));
+  const coordinateShearGain = rangeRow(
+    'Coordinate Shear Gain', 0, 2, 0.05, initialCoordinateShear.gain,
+    (gain) => A.coordinateShear({ gain }),
+  );
+  interaction.append(coordinateShearGain.root);
   interaction.append(hint(
-    'Press and Drag move structural coordinates only while the influence is active. Negative Press Gain reverses the radial sampling direction. Disable Legacy Fixed response to inspect the new spatial response alone.',
+    'Press, Drag and Coordinate Shear alter structural coordinates only while the influence is active. Coordinate Shear reuses Active Radius. The legacy toggle includes Fixed\'s scalar thickness shear; disable it to compare the true coordinate transform alone.',
   ));
 
   // ---- rendering extras ----
@@ -301,7 +312,7 @@ export function buildUI(root, state, labState, A) {
     passiveRadius.input.value = String(motionWarp.radius);
     passiveRadius.output.textContent = formatNum(motionWarp.radius, 0.01);
     const active = A.activeDeformationConfiguration();
-    const legacy = root.querySelector('input[aria-label="Legacy Fixed response"]');
+    const legacy = root.querySelector('input[aria-label="Legacy Fixed response (includes thickness shear)"]');
     if (legacy) legacy.checked = active.legacyFixedEnabled;
     const press = root.querySelector('input[aria-label="Active Press"]');
     if (press) press.checked = active.pressEnabled;
@@ -313,6 +324,11 @@ export function buildUI(root, state, labState, A) {
     activeDragGain.output.textContent = formatNum(active.dragGain, 0.05);
     activeRadius.input.value = String(active.radius);
     activeRadius.output.textContent = formatNum(active.radius, 0.01);
+    const coordinateShear = A.coordinateShearConfiguration();
+    const shear = root.querySelector('input[aria-label="Coordinate Shear"]');
+    if (shear) shear.checked = coordinateShear.enabled;
+    coordinateShearGain.input.value = String(coordinateShear.gain);
+    coordinateShearGain.output.textContent = formatNum(coordinateShear.gain, 0.05);
     const pr = root.querySelector('input[aria-label="Surface probe"]');
     if (pr) pr.checked = labState.probe;
     pauseBtn.textContent = state.paused ? '▶' : '⏸';

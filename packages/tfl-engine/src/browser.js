@@ -42,7 +42,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
       }
     },
 
-    render({ state, influence, motionWarp, activeDeformation, renderScale }) {
+    render({ state, influence, motionWarp, activeDeformation, coordinateShear, renderScale }) {
       const aspect = logicalAspect();
       const fixedInfluence = canonicalInfluenceToFixed(
         influence,
@@ -65,6 +65,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
             ),
             motionWarp,
             activeDeformation,
+            coordinateShear,
           });
           host.renderer.render(host.stage.scene, host.stage.camera);
           return { aspect: fittedAspect };
@@ -107,6 +108,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
         capabilities: {
           motionWarp: Boolean(host.renderer && host.stage),
           activeDeformation: Boolean(host.renderer && host.stage),
+          coordinateShear: Boolean(host.renderer && host.stage),
         },
       };
     },
