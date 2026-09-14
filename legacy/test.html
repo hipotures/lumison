@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Thin Film — Iridescent Fluid</title>
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; background: #04060b; }
+  #gl, #fallback {
+    position: fixed; inset: 0;
+    width: 100vw; height: 100vh;
+    display: block;
+  }
+  #fallback { display: none; }
+  #error {
+    display: none;
+    position: fixed; z-index: 10;
+    left: 50%; bottom: 20px; transform: translateX(-50%);
+    max-width: min(80vw, 640px);
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(8, 11, 18, 0.85);
+    border: 1px solid rgba(140, 170, 210, 0.25);
+    color: #d7e0ea;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+    pointer-events: none;
+  }
+  noscript {
+    position: fixed; left: 0; right: 0; bottom: 38%;
+    text-align: center; color: #d7e0ea;
+    font: 14px/1.5 system-ui, sans-serif;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="fallback" aria-hidden="true"></canvas>
+<div id="error" role="alert"></div>
+<noscript><p>JavaScript is required to animate the film.</p></noscript>
+<script>
+(() => {
+  "use strict";
+
+  const DPR_CAP = 1.25;
+  const glCanvas = document.getElementById("gl");
+  const fbCanvas = document.getElementById("fallback");
+  const errBox = document.getElementById("error");
+
+  let fatal = false;
+  function showFatal(msg) {
+    errBox.textContent = msg;
+    errBox.style.display = "block";
+    if (window.console && console.error) console.error(msg);
+  }
+
+  /* ------------------------- Canvas2D fallback ------------------------- */
+  let fallbackOn = false;
+  function startFallback(reason) {
+    if (fallbackOn) return;
+    fallbackOn = true;
+    fatal = true;
+    glCanvas.style.display = "none";
+    fbCanvas.style.display = "block";
+    if (reason) showFatal(reason);
+
+    const ctx = fbCanvas.getContext("2d");
+    if (!ctx) return;
+
+    function sizeFallback() {
+      const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+      const w = Math.max(1, Math.floor(window.innerWidth * dpr));
+      const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+      if (fbCanvas.width !== w) fbCanvas.width = w;
+      if (fbCanvas.height !== h) fbCanvas.height = h;
+    }
+    sizeFallback();
+    window.addEventListener("resize", sizeFallback);
+    window.addEventListener("orientationchange", sizeFallback);
+
+    const hsla = (h, s, l, a) =>
+      "hsla(" + (((h % 360) + 360) % 360).toFixed(1) + "," + s + "%," + l + "%," + a + ")";
+
+    const blobs = [
+      { sp: 0.107, ph: 0.0, hue0: 187, dir: 1 },
+      { sp: 0.073, ph: 2.1, hue0: 283, dir: -1 },
+      { sp: 0.051, ph: 4.2, hue0: 331, dir: 1 },
+      { sp: 0.037, ph: 1.3, hue0:  42, dir: -1 }
+    ];
+
+    function draw(t) {
+      const w = fbCanvas.width, h = fbCanvas.height;
+      if (w < 2 || h < 2) return;
+
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "#04060b";
+      ctx.fillRect(0, 0, w, h);
+
+      const base = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, Math.max(w, h) * 0.75);
+      base.addColorStop(0, "rgba(32, 48, 84, 0.55)");
+      base.addColorStop(1, "rgba(4, 6, 11, 0)");
+      ctx.fillStyle = base;
+      ctx.fillRect(0, 0, w, h);
+
+      // drifting iridescent cells (slow, incommensurate speeds)
+      ctx.globalCompositeOperation = "screen";
+      for (let i = 0; i < blobs.length; i++) {
+        const b = blobs[i];
+        const wob = 0.55 + 0.45 * Math.sin(t * b.sp * 0.37 + 1.7 + i);
+        const x = w * (0.5 + 0.36 * Math.sin(t * b.sp + b.ph) * wob);
+        const y = h * (0.5 + 0.36 * Math.cos(t * b.sp * 0.83 + b.ph * 1.9));
+        const r = Math.max(1, Math.max(w, h) * (0.34 + 0.17 * Math.sin(t * b.sp * 0.53 + i * 2.4)));
+        const hue = b.hue0 + t * 4.2 * b.dir;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0.0, hsla(hue, 88, 62, 0.50));
+        g.addColorStop(0.5, hsla(hue + 45, 84, 52, 0.20));
+        g.addColorStop(1.0, hsla(hue + 90, 80, 45, 0.00));
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+      }
+
+      // slow conic iridescence sweep (if supported)
+      if (typeof ctx.createConicGradient === "function") {
+        const cx = w * (0.5 + 0.22 * Math.sin(t * 0.061));
+        const cy = h * (0.5 + 0.22 * Math.cos(t * 0.047));
+        const cg = ctx.createConicGradient(t * 0.043, cx, cy);
+        const stops = [187, 262, 320, 355, 42, 122, 187];
+        for (let i = 0; i < stops.length; i++) {
+          cg.addColorStop(i / (stops.length - 1), hsla(stops[i] + t * 3.1, 85, 58, 0.45));
+        }
+        ctx.globalCompositeOperation = "overlay";
+        ctx.fillStyle = cg;
+        ctx.fillRect(0, 0, w, h);
+      }
+
+      // traveling soft highlight
+      const sx = w * (0.5 + 0.42 * Math.sin(t * 0.071));
+      const sy = h * (0.5 + 0.42 * Math.cos(t * 0.113));
+      const sr = Math.max(1, Math.min(w, h) * 0.30);
+      const spg = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr);
+      spg.addColorStop(0.0, "rgba(255, 250, 240, 0.34)");
+      spg.addColorStop(0.35, "rgba(255, 245, 230, 0.10)");
+      spg.addColorStop(1.0, "rgba(255, 245, 230, 0.0)");
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = spg;
+      ctx.fillRect(0, 0, w, h);
+
+      // vignette
+      ctx.globalCompositeOperation = "source-over";
+      const vg = ctx.createRadialGradient(w * 0.5, h * 0.5, Math.min(w, h) * 0.35,
+                                          w * 0.5, h * 0.5, Math.max(w, h) * 0.72);
+      vg.addColorStop(0, "rgba(0,0,0,0)");
+      vg.addColorStop(1, "rgba(0,0,0,0.42)");
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    const t0 = performance.now();
+    (function frame(now) {
+      if (!fallbackOn) return;
+      try { draw((now - t0) * 0.001); } catch (e) { if (console.error) console.error(e); }
+      requestAnimationFrame(frame);
+    })(performance.now());
+  }
+
+  /* ----------------------------- WebGL2 -------------------------------- */
+  const gl = glCanvas.getContext("webgl2", {
+    alpha: false, antialias: false, depth: false, stencil: false,
+    powerPreference: "high-performance"
+  });
+
+  if (!gl) {
+    startFallback("WebGL2 is not available in this browser. Showing the Canvas2D fallback.");
+    return;
+  }
+
+  const VERT_SRC = `#version 300 es
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+  const FRAG_SRC = `#version 300 es
+precision highp float;
+
+uniform vec2  u_resolution;   // framebuffer size in pixels
+uniform float u_time;         // seconds
+uniform float u_pixelRatio;   // device pixel ratio (capped at 1.25 by JS)
+
+out vec4 fragColor;
+
+#define TWO_PI 6.283185307179586476
+
+vec3 permute(vec3 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
+
+float snoise(vec2 v) {
+  const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+                     -0.577350269189626, 0.024390243902439);
+  vec2 i  = floor(v + dot(v, C.yy));
+  vec2 x0 = v - i + dot(i, C.xx);
+  vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+  vec4 x12 = x0.xyxy + C.xxzz;
+  x12.xy -= i1;
+  i = mod(i, 289.0);
+  vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+  vec3 x = 2.0 * fract(p * C.www) - 1.0;
+  vec3 h = abs(x) - 0.5;
+  vec3 ox = floor(x + 0.5);
+  vec3 a0 = x - ox;
+  vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+  m = m * m;
+  m = m * m;
+  vec3 g;
+  g.x  = a0.x  * x0.x  + h.x  * x0.y;
+  g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+  return 130.0 * dot(m, g);
+}
+
+mat2 rot2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+
+float fbm(vec2 p) {
+  float sum = 0.0;
+  float amp = 0.55;
+  mat2 m = rot2(0.8);
+  for (int i = 0; i < 4; i++) {
+    sum += amp * snoise(p);
+    p = m * p * 2.02 + vec2(11.7, -7.3);
+    amp *= 0.5;
+  }
+  return sum;
+}
+
+// Thin-film interference: sum of reflected waves at 5 sample wavelengths.
+// The +pi front-surface phase shift makes the thinnest films go dark,
+// exactly like drained soap bubbles.
+vec3 thinFilm(float tNm, float cosT) {
+  float ph = 2.0 * 1.34 * tNm * cosT;  // optical path difference, nm
+  vec3 c = vec3(0.0);
+  c += vec3(0.30, 0.08, 0.75) * 0.30 * (0.5 - 0.5 * cos(TWO_PI * ph / 395.0)); // violet
+  c += vec3(0.04, 0.30, 0.95) * 0.30 * (0.5 - 0.5 * cos(TWO_PI * ph / 455.0)); // blue
+  c += vec3(0.08, 0.85, 0.32) * 0.28 * (0.5 - 0.5 * cos(TWO_PI * ph / 525.0)); // green
+  c += vec3(0.95, 0.52, 0.08) * 0.22 * (0.5 - 0.5 * cos(TWO_PI * ph / 590.0)); // amber
+  c += vec3(0.90, 0.10, 0.14) * 0.18 * (0.5 - 0.5 * cos(TWO_PI * ph / 650.0)); // red
+  return c;
+}
+
+float hash12(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+void main() {
+  vec2 fc = gl_FragCoord.xy;
+  vec2 uv = fc / u_resolution;
+  vec2 p = (fc - 0.5 * u_resolution) / u_resolution.y;
+  p *= 0.9;
+
+  float T = u_time;
+
+  // pixel-ratio detail balance
+  p *= mix(1.0, 0.94, (clamp(u_pixelRatio, 1.0, 1.25) - 1.0) * 4.0);
+
+  // slow, incommensurate time streams: drift + rotation + warp evolution
+  float t1 = T * 0.035;
+  float t2 = T * 0.024;
+  float t3 = T * 0.017;
+  float t4 = T * 0.011;
+  p += vec2(0.006, -0.004) * T;
+  p = rot2(0.0045 * T) * p;
+
+  // ---- domain-warped flow field (two warp levels) ----
+  vec2 q = vec2(
+    fbm(p + vec2(0.0, 0.0) + t1),
+    fbm(p + vec2(5.2, 1.3) - t2)
+  );
+  vec2 r = vec2(
+    fbm(p + 2.4 * q + vec2(1.7, 9.2) + t3),
+    fbm(p + 2.4 * q + vec2(8.3, 2.8) - t4)
+  );
+  float f = 0.5 + 0.5 * fbm(p + 2.6 * r + t1 * 0.6);
+
+  // slow drainage cells -> thinning / thickening regions
+  float drain = 0.5 + 0.5 * fbm(p * 0.7 + vec2(3.1, -2.2) + t2 * 1.5);
+
+  float thick = f * 0.70 + drain * 0.36;
+  thick = clamp(thick, 0.02, 1.0);
+  thick = pow(thick, 1.35);
+
+  // ---- surface-tension ripples (fine traveling waves) ----
+  float rip = 0.0;
+  rip += sin(dot(p, vec2( 2.3,  1.7)) * 10.0 - T * 0.90);
+  rip += sin(dot(p, vec2(-1.9,  2.6)) * 13.0 - T * 0.55);
+  rip += sin(dot(p, vec2( 1.2, -2.9)) *  8.0 - T * 1.31);
+  rip *= 0.333;
+  rip *= (0.35 + 0.65 * (0.5 + 0.5 * fbm(p * 1.9 - t3 * 1.2)));
+  rip *= 0.5;
+
+  float micro = snoise(p * 22.0 + t3 * 2.0);
+
+  // film thickness in nanometres (48nm ~ black film, ~610nm ~ washed out)
+  float tNm = 48.0 + 560.0 * thick + rip * 40.0 + micro * 22.0;
+  tNm = max(tNm, 8.0);
+
+  // ---- surface normal from screen-space curvature ----
+  float hN = thick * 26.0 + rip * 2.4;
+  vec2 grad = vec2(dFdx(hN), dFdy(hN)) * 6.0;
+  vec3 N = normalize(vec3(-grad, 1.0));
+
+  // ---- gently moving light ----
+  vec3 V = vec3(0.0, 0.0, 1.0);
+  vec3 L = normalize(vec3(0.65 * cos(T * 0.110), 0.65 * sin(T * 0.071), 0.55));
+  vec3 H = normalize(L + V);
+  float ndh = max(dot(N, H), 0.0);
+  vec3 lightTint = mix(vec3(1.0, 0.97, 0.92), vec3(0.82, 0.93, 1.0),
+                       0.5 + 0.5 * sin(T * 0.021));
+  vec3 spec = lightTint * (pow(ndh, 140.0) * 1.35 + pow(ndh, 32.0) * 0.15);
+
+  vec3 L2 = normalize(vec3(-0.5 * cos(T * 0.053), -0.5 * sin(T * 0.090), 0.5));
+  vec3 H2 = normalize(L2 + V);
+  float ndh2 = max(dot(N, H2), 0.0);
+  vec3 fillGlow = vec3(0.55, 0.72, 1.0) * pow(ndh2, 60.0) * 0.10;
+
+  // ---- thin-film interference colour ----
+  float cosT = clamp(dot(N, H), 0.35, 1.0);
+  vec3 col = thinFilm(tNm, cosT);
+
+  // very thick films blur toward white
+  float blur = smoothstep(430.0, 620.0, tNm);
+  float luma = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(col, vec3(luma) * 1.06, blur * 0.65);
+
+  // ---- membrane shading: fresnel + bright creases ----
+  float ndv = abs(dot(N, V));
+  float fres = pow(1.0 - ndv, 2.5);
+  float wall = smoothstep(0.25, 1.1, length(grad));
+  float thinFactor = 0.22 + 0.78 * smoothstep(55.0, 135.0, tNm);
+  float bright = (0.34 + 0.85 * max(fres, wall * 0.9)) * thinFactor * 1.25;
+  col *= bright;
+
+  // soft internal luminosity
+  float glowF = smoothstep(0.25, 0.9, f);
+  col += mix(vec3(0.85, 0.92, 1.0), col, 0.5) * glowF * 0.17;
+
+  // faint cool sheen in the thinnest (black-film) regions
+  col += vec3(0.07, 0.10, 0.16) * (1.0 - smoothstep(0.02, 0.14, thick)) * 0.6;
+
+  col += spec + fillGlow;
+
+  // gentle vignette for depth
+  vec2 vq = uv - 0.5;
+  col *= 1.0 - 0.22 * dot(vq, vq) * 2.2;
+
+  // tonemap + slight lift
+  col *= 1.30;
+  col = 1.0 - exp(-col * 1.35);
+  col = pow(col, vec3(0.94));
+
+  // dither to prevent banding
+  col += (hash12(fc + fract(T) * 791.7) - 0.5) * (2.0 / 255.0);
+
+  fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}`;
+
+  function compileShader(type, source, label) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, source);
+    gl.compileShader(sh);
+    if (gl.getShaderParameter(sh, gl.COMPILE_STATUS)) return sh;
+    const log = gl.getShaderInfoLog(sh) || "(no info log)";
+    gl.deleteShader(sh);
+    startFallback(label + " shader failed to compile:\n" + log);
+    return null;
+  }
+
+  const vs = compileShader(gl.VERTEX_SHADER, VERT_SRC, "Vertex");
+  const fs = vs ? compileShader(gl.FRAGMENT_SHADER, FRAG_SRC, "Fragment") : null;
+  if (!vs || !fs) {
+    if (vs) gl.deleteShader(vs);
+    return;
+  }
+
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    const log = gl.getProgramInfoLog(prog) || "(no info log)";
+    gl.deleteProgram(prog);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    startFallback("Shader program failed to link:\n" + log);
+    return;
+  }
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+  gl.useProgram(prog);
+
+  const uRes = gl.getUniformLocation(prog, "u_resolution");
+  const uTime = gl.getUniformLocation(prog, "u_time");
+  const uPx = gl.getUniformLocation(prog, "u_pixelRatio");
+  if (!uRes || !uTime || !uPx) {
+    startFallback("Required uniform not found (u_resolution / u_time / u_pixelRatio).");
+    return;
+  }
+
+  gl.disable(gl.DEPTH_TEST);
+  gl.disable(gl.BLEND);
+
+  let dpr = 1;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+    const w = Math.max(1, Math.floor(window.innerWidth * dpr));
+    const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+    if (glCanvas.width !== w || glCanvas.height !== h) {
+      glCanvas.width = w;
+      glCanvas.height = h;
+    }
+    gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+  }
+  window.addEventListener("resize", resize);
+  window.addEventListener("orientationchange", resize);
+
+  glCanvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault();
+    startFallback("WebGL context was lost. Showing the Canvas2D fallback.");
+  });
+
+  let rafId = 0;
+  const t0 = performance.now();
+  function frame(now) {
+    if (fatal) return;
+    try {
+      resize();
+      gl.uniform2f(uRes, glCanvas.width, glCanvas.height);
+      gl.uniform1f(uTime, (now - t0) * 0.001);
+      gl.uniform1f(uPx, dpr);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      rafId = requestAnimationFrame(frame);
+    } catch (err) {
+      fatal = true;
+      cancelAnimationFrame(rafId);
+      startFallback("Rendering failed:\n" + (err && err.message ? err.message : String(err)));
+    }
+  }
+  resize();
+  rafId = requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
