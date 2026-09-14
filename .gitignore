@@ -1,1 +1,6 @@
 node_modules/
+
+# Local Lumison sound banks are intentionally not versioned.
+apps/lumison/assets/soundfonts/*.sf2
+apps/lumison/assets/soundfonts/*.sf3
+apps/lumison/assets/soundfonts/*.dls

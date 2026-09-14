@@ -1,5 +1,11 @@
 import { createState, TflEngine } from '../../../packages/tfl-engine/src/index.js';
 import { createBrowserRenderHost } from '../../../packages/tfl-engine/src/browser.js';
+import { SoundFontAudioEngine } from './audio/soundfont-audio-engine.js';
+import {
+  isSupportedSoundFontName,
+  loadSoundFontCatalog,
+  soundFontAssetUrl,
+} from './audio/soundfont-catalog.js';
 import { MidiFilePlayer } from './midi/midi-file-player.js';
 import { WebMidiSource } from './midi/web-midi-source.js';
 import {
@@ -37,6 +43,10 @@ function pedalText(pedal) {
 function createMidiUI({ engine, baseline, canvas }) {
   const player = new MidiFilePlayer();
   const liveSource = new WebMidiSource();
+  const audio = new SoundFontAudioEngine({
+    getTransport: () => player.transport,
+    getPerformance: () => player.performance,
+  });
   let features = createMusicalFeatureState();
   const mapper = new MusicalVisualMapper({ engine, baseline });
   let mode = 'file';
@@ -99,6 +109,17 @@ function createMidiUI({ engine, baseline, canvas }) {
     element('featureMotion').textContent = features.pitchMotion01.toFixed(2);
     element('featureSustain').textContent = features.sustain01.toFixed(2);
 
+    element('audioEnabled').checked = audio.enabled;
+    element('audioEnabled').disabled = mode === 'live';
+    element('soundfontSelect').disabled = mode === 'live' || audio.loading;
+    element('loadLocalSoundfont').disabled = mode === 'live' || audio.loading;
+    element('audioVolume').disabled = mode === 'live';
+    element('audioVolume').value = String(audio.volume);
+    element('audioVolumeValue').textContent = audio.volume.toFixed(2);
+    element('audioStatus').textContent = audio.status;
+    element('audioStatus').title = audio.error;
+    element('audioStatus').classList.toggle('error', audio.status === 'Error');
+
     element('trackCount').textContent = metadata ? String(metadata.tracks) : '—';
     const names = metadata?.trackNames.join(', ') || '—';
     element('trackNames').textContent = names;
@@ -119,6 +140,7 @@ function createMidiUI({ engine, baseline, canvas }) {
     mappingDirty = true;
   });
   player.subscribe((currentPlayer, reason) => {
+    if (reason === 'load') audio.setTimeline(currentPlayer.canonicalEvents);
     if (reason === 'seek') {
       features = rebuildMusicalFeatureState(
         currentPlayer.canonicalEvents,
@@ -142,8 +164,65 @@ function createMidiUI({ engine, baseline, canvas }) {
       if (mode === 'file') mapper.loop(features);
       mappingDirty = false;
     }
+    audio.handleTransport(reason);
     dirty = true;
   });
+  audio.subscribe(() => { dirty = true; });
+
+  async function populateSoundFontCatalog() {
+    const select = element('soundfontSelect');
+    try {
+      const catalog = await loadSoundFontCatalog();
+      for (const entry of catalog) {
+        const option = new Option(entry.name, `hosted:${entry.id}`);
+        option.dataset.file = entry.file;
+        select.append(option);
+      }
+    } catch (error) {
+      console.error('SoundFont catalog load failed:', error);
+      audio.setStatus('Error', error?.message ?? String(error));
+    }
+    dirty = true;
+  }
+
+  async function loadHostedSoundFont(option) {
+    const entry = {
+      id: option.value.slice('hosted:'.length),
+      name: option.textContent,
+      file: option.dataset.file,
+    };
+    const loaded = await audio.loadSoundFont({
+      name: entry.name,
+      loadBuffer: async () => {
+        const response = await fetch(soundFontAssetUrl(entry), { cache: 'no-store' });
+        if (!response.ok) throw new Error(`SoundFont request failed (${response.status})`);
+        return response.arrayBuffer();
+      },
+    });
+    if (!loaded) element('soundfontSelect').value = '';
+    dirty = true;
+  }
+
+  async function loadLocalSoundFont(file) {
+    if (!file) return;
+    if (!isSupportedSoundFontName(file.name)) {
+      audio.setStatus('Error', 'Choose an .sf2, .sf3, or .dls file');
+      return;
+    }
+    const loaded = await audio.loadSoundFont({
+      name: file.name,
+      loadBuffer: () => file.arrayBuffer(),
+    });
+    if (loaded) {
+      const select = element('soundfontSelect');
+      select.querySelector('option[data-local]')?.remove();
+      const option = new Option(`Local: ${file.name}`, 'local');
+      option.dataset.local = 'true';
+      select.append(option);
+      select.value = 'local';
+    }
+    dirty = true;
+  }
 
   async function loadFile(file) {
     if (!file) return;
@@ -169,11 +248,34 @@ function createMidiUI({ engine, baseline, canvas }) {
     loadFile(event.target.files?.[0]);
     event.target.value = '';
   });
-  element('play').addEventListener('click', () => player.play());
+  async function play() {
+    if (audio.enabled && audio.activeBankId) await audio.activate();
+    player.play();
+  }
+
+  element('play').addEventListener('click', () => { void play(); });
   element('pause').addEventListener('click', () => player.pause());
   element('stop').addEventListener('click', () => player.stop());
   element('speed').addEventListener('change', (event) => player.setRate(Number(event.target.value)));
   element('loop').addEventListener('change', (event) => player.setLoop(event.target.checked));
+  element('audioEnabled').addEventListener('change', (event) => {
+    audio.setEnabled(event.target.checked);
+  });
+  element('audioVolume').addEventListener('input', (event) => {
+    const volume = audio.setVolume(event.target.value);
+    element('audioVolumeValue').textContent = volume.toFixed(2);
+  });
+  element('soundfontSelect').addEventListener('change', (event) => {
+    const option = event.target.selectedOptions[0];
+    if (option?.value.startsWith('hosted:')) void loadHostedSoundFont(option);
+  });
+  element('loadLocalSoundfont').addEventListener('click', () => {
+    element('soundfontInput').click();
+  });
+  element('soundfontInput').addEventListener('change', (event) => {
+    void loadLocalSoundFont(event.target.files?.[0]);
+    event.target.value = '';
+  });
   element('mappingEnabled').addEventListener('change', (event) => {
     mapper.setEnabled(mode === 'file' && event.target.checked);
     if (mapper.enabled) mapper.seek(features);
@@ -212,6 +314,7 @@ function createMidiUI({ engine, baseline, canvas }) {
     if (nextMode === mode) return;
     const live = nextMode === 'live';
     if (live) player.stop();
+    audio.setSourceActive(!live);
     mapper.setEnabled(!live && element('mappingEnabled').checked);
     if (!live && mapper.enabled) mapper.seek(features);
     element('mappingEnabled').disabled = live;
@@ -236,9 +339,11 @@ function createMidiUI({ engine, baseline, canvas }) {
     if (['INPUT', 'SELECT', 'BUTTON'].includes(event.target?.tagName)) return;
     event.preventDefault();
     if (player.transport.playing) player.pause();
-    else player.play();
+    else void play();
   });
 
+  void populateSoundFontCatalog();
+  window.addEventListener('beforeunload', () => audio.destroy(), { once: true });
   render();
   return {
     update() {

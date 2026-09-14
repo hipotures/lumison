@@ -13,7 +13,10 @@
       "three": "/node_modules/three/build/three.module.js",
       "three/webgpu": "/node_modules/three/build/three.webgpu.js",
       "three/tsl": "/node_modules/three/build/three.tsl.js",
-      "midifile-ts": "/node_modules/midifile-ts/dist/index.js"
+      "midifile-ts": "/node_modules/midifile-ts/dist/index.js",
+      "spessasynth_lib": "/node_modules/spessasynth_lib/dist/index.js",
+      "spessasynth_core": "/node_modules/spessasynth_core/dist/index.js",
+      "stb-vorbis": "/node_modules/stb-vorbis/dist/index.js"
     }
   }
   </script>
@@ -118,6 +121,23 @@
         <p class="empty-state">Hardware input not implemented yet</p>
       </section>
     </div>
+
+    <section aria-labelledby="audioHeading">
+      <h2 id="audioHeading">Audio</h2>
+      <div class="audio-controls">
+        <label class="check"><input id="audioEnabled" type="checkbox" checked> Enabled</label>
+        <label for="soundfontSelect">SoundFont</label>
+        <select id="soundfontSelect">
+          <option value="" selected disabled>Select SoundFont…</option>
+        </select>
+        <button id="loadLocalSoundfont" type="button">Load local SoundFont…</button>
+        <input id="soundfontInput" type="file" accept=".sf2,.sf3,.dls" hidden>
+        <label for="audioVolume">Volume</label>
+        <input id="audioVolume" type="range" min="0" max="1" step="0.01" value="0.8">
+        <output id="audioVolumeValue" for="audioVolume">0.80</output>
+        <span>Status</span><output id="audioStatus">No SoundFont</output>
+      </div>
+    </section>
 
     <section aria-labelledby="mappingHeading">
       <h2 id="mappingHeading">Visual Mapping</h2>

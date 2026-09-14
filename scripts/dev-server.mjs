@@ -1,7 +1,9 @@
 import { createReadStream, stat } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createSoundFontCatalog } from './lib/soundfont-catalog.mjs';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const requestedApp = process.argv.find((argument) => argument.startsWith('--app='))?.slice(6);
@@ -9,6 +11,8 @@ const defaultApp = requestedApp === 'lumison' ? 'lumison' : 'tfl-lab';
 const portArgument = process.argv.slice(2).find((argument) => /^\d+$/.test(argument));
 const port = Number(portArgument ?? process.env.PORT ?? 8000);
 const host = process.env.HOST?.trim() || null;
+const soundfontCatalogPath = '/apps/lumison/assets/soundfonts/catalog.json';
+const soundfontDirectory = path.join(repositoryRoot, 'apps/lumison/assets/soundfonts');
 const mime = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -17,12 +21,23 @@ const mime = {
   '.mjs': 'text/javascript; charset=utf-8',
 };
 
-const server = http.createServer((request, response) => {
+const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, `http://localhost:${port}`);
     if (url.pathname === '/') {
       response.writeHead(302, { Location: `/apps/${defaultApp}/` });
       response.end();
+      return;
+    }
+    if (url.pathname === soundfontCatalogPath) {
+      const catalog = createSoundFontCatalog(
+        await readdir(soundfontDirectory, { withFileTypes: true }),
+      );
+      response.writeHead(200, {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json; charset=utf-8',
+      });
+      response.end(`${JSON.stringify(catalog, null, 2)}\n`);
       return;
     }
     let pathname = decodeURIComponent(url.pathname);

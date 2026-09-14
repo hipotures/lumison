@@ -6,10 +6,12 @@
     "check": "node scripts/check.mjs",
     "dev:tfl": "node scripts/dev-server.mjs",
     "dev:lumison": "node scripts/dev-server.mjs --app=lumison",
+    "soundfonts:scan": "node scripts/scan-soundfonts.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "midifile-ts": "1.5.2",
+    "spessasynth_lib": "4.3.14",
     "three": "0.185.1"
   }
 }
