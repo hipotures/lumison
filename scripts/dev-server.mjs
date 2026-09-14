@@ -4,7 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const port = Number(process.argv[2] ?? process.env.PORT ?? 8000);
+const requestedApp = process.argv.find((argument) => argument.startsWith('--app='))?.slice(6);
+const defaultApp = requestedApp === 'lumison' ? 'lumison' : 'tfl-lab';
+const portArgument = process.argv.slice(2).find((argument) => /^\d+$/.test(argument));
+const port = Number(portArgument ?? process.env.PORT ?? 8000);
 const host = process.env.HOST?.trim() || null;
 const mime = {
   '.css': 'text/css; charset=utf-8',
@@ -18,7 +21,7 @@ const server = http.createServer((request, response) => {
   try {
     const url = new URL(request.url, `http://localhost:${port}`);
     if (url.pathname === '/') {
-      response.writeHead(302, { Location: '/apps/tfl-lab/' });
+      response.writeHead(302, { Location: `/apps/${defaultApp}/` });
       response.end();
       return;
     }
@@ -50,7 +53,9 @@ const server = http.createServer((request, response) => {
 
 const onListening = () => {
   const displayHost = host?.includes(':') ? `[${host}]` : (host ?? 'localhost');
+  console.log(`Default: http://${displayHost}:${port}/apps/${defaultApp}/`);
   console.log(`TFL Lab: http://${displayHost}:${port}/apps/tfl-lab/`);
+  console.log(`Lumison: http://${displayHost}:${port}/apps/lumison/`);
 };
 
 if (host) {

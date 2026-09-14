@@ -5,9 +5,11 @@
   "scripts": {
     "check": "node scripts/check.mjs",
     "dev:tfl": "node scripts/dev-server.mjs",
+    "dev:lumison": "node scripts/dev-server.mjs --app=lumison",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "midifile-ts": "1.5.2",
     "three": "0.185.1"
   }
 }
