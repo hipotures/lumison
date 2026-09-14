@@ -4,7 +4,6 @@ import {
   ACTIVE_DEFORMATION_CALIBRATION,
   activeDeformationDisplacementAt,
   advanceActiveDeformation,
-  canonicalInfluenceToFixed,
   createActiveDeformationState,
   createSpatialInfluence,
   setParameterLock,
@@ -150,7 +149,6 @@ test('active radius and gains validate without corrupting rejected settings', ()
     dragGain: -0.1,
     radius: Infinity,
     pressEnabled: 'yes',
-    legacyFixedEnabled: 1,
     pointerButton: 0,
   });
   assert.equal(report.ok, false);
@@ -160,11 +158,9 @@ test('active radius and gains validate without corrupting rejected settings', ()
     'value-out-of-range',
     'value-must-be-finite-number',
     'value-must-be-boolean',
-    'value-must-be-boolean',
     'unknown-active-deformation-setting',
   ]);
   assert.deepEqual(engine.getActiveDeformationConfiguration(), {
-    legacyFixedEnabled: true,
     pressEnabled: false,
     pressGain: 1,
     dragEnabled: false,
@@ -173,11 +169,10 @@ test('active radius and gains validate without corrupting rejected settings', ()
   });
 });
 
-test('passive, active and legacy Fixed controls remain independent', () => {
+test('passive and active controls remain independent', () => {
   const engine = new TflEngine();
   engine.setMotionWarp({ enabled: true, gain: 1.4, radius: 0.24 });
   engine.setActiveDeformation({
-    legacyFixedEnabled: false,
     pressEnabled: true,
     pressGain: -0.75,
     dragEnabled: true,
@@ -190,7 +185,6 @@ test('passive, active and legacy Fixed controls remain independent', () => {
     radius: 0.24,
   });
   assert.deepEqual(engine.getActiveDeformationConfiguration(), {
-    legacyFixedEnabled: false,
     pressEnabled: true,
     pressGain: -0.75,
     dragEnabled: true,
@@ -203,7 +197,7 @@ test('passive, active and legacy Fixed controls remain independent', () => {
   assert.equal(engine.getMotionWarpConfiguration().enabled, false);
 });
 
-test('default configuration preserves the Phase 3A and legacy Fixed path', () => {
+test('default configuration keeps active deformation disabled', () => {
   let rendered = null;
   const renderHost = {
     backend: 'test',
@@ -218,26 +212,16 @@ test('default configuration preserves the Phase 3A and legacy Fixed path', () =>
   engine.setSpatialInfluence(activeInfluence({ velocity: { x: 1, y: -0.5 } }));
   engine.advance(0.5);
   engine.render();
-  assert.equal(rendered.activeDeformation.legacyFixedEnabled, true);
   assert.equal(rendered.activeDeformation.pressEnabled, false);
   assert.equal(rendered.activeDeformation.dragEnabled, false);
   assert.equal(rendered.activeDeformation.pressDisplacement, 0);
   assert.deepEqual(rendered.activeDeformation.dragDisplacement, { x: 0, y: 0 });
-
-  const fixedEnabled = canonicalInfluenceToFixed(engine.influence, 1.5);
-  const fixedDisabled = canonicalInfluenceToFixed(engine.influence, 1.5, { enabled: false });
-  assert.ok(fixedEnabled.strength > 0);
-  assert.notEqual(fixedEnabled.vx, 0);
-  assert.equal(fixedDisabled.strength, 0);
-  assert.equal(fixedDisabled.vx, 0);
-  assert.equal(fixedDisabled.vy, 0);
 });
 
 test('equal active influence and dt sequences replay and restore deterministically', () => {
   const run = () => {
     const engine = new TflEngine();
     engine.setActiveDeformation({
-      legacyFixedEnabled: false,
       pressEnabled: true,
       pressGain: 1.2,
       dragEnabled: true,
@@ -279,7 +263,6 @@ test('active configuration does not mutate scene parameters, locks or presets', 
   const preset = engine.state.preset;
 
   engine.setActiveDeformation({
-    legacyFixedEnabled: false,
     pressEnabled: true,
     dragEnabled: true,
     radius: 0.27,
@@ -292,7 +275,6 @@ test('active configuration does not mutate scene parameters, locks or presets', 
 
   engine.factoryReset();
   assert.deepEqual(engine.getActiveDeformationConfiguration(), {
-    legacyFixedEnabled: true,
     pressEnabled: false,
     pressGain: 1,
     dragEnabled: false,

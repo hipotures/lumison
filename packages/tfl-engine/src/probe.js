@@ -5,11 +5,7 @@ import { sampleFieldApprox } from './film.js';
 export function sampleSurface(interaction, params, time) {
   if (!interaction?.active) return null;
   try {
-    const sample = sampleFieldApprox(interaction.x, interaction.y, params, time, {
-      x: interaction.x,
-      y: interaction.y,
-      strength: interaction.strength,
-    });
+    const sample = sampleFieldApprox(interaction.x, interaction.y, params, time);
     return {
       ...sample,
       u: interaction.x,

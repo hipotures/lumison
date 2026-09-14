@@ -74,7 +74,7 @@ import {
   transactParameters,
 } from './state.js';
 import {
-  canonicalInfluenceToFixed,
+  surfaceToNormalizedViewport,
   createSpatialInfluence,
   normalizeAspect,
   sanitizeSpatialInfluence,
@@ -475,7 +475,7 @@ export class TflEngine {
         restoredActiveDeformation,
         savedActiveDeformation,
       );
-      if (!activeReport.ok || activeReport.accepted.length !== 6) {
+      if (!activeReport.ok || activeReport.accepted.length !== 5) {
         return { ok: false, reason: 'invalid-active-deformation-configuration' };
       }
     }
@@ -610,10 +610,12 @@ export class TflEngine {
       if (now - this.lastProbeTime < minIntervalSeconds) return 'throttled';
       this.lastProbeTime = now;
     }
-    const fixed = canonicalInfluenceToFixed(this.influence, this.viewport.aspect, {
-      enabled: this.activeDeformation.configuration.legacyFixedEnabled,
-    });
-    const sample = sampleSurface(fixed, this.state.current, this.state.clocks.animation);
+    const uv = surfaceToNormalizedViewport(this.influence.position, this.viewport.aspect);
+    const sample = sampleSurface(
+      { x: uv.x, y: 1 - uv.y, active: this.influence.positionValid },
+      this.state.current,
+      this.state.clocks.animation,
+    );
     if (!sample || sample === 'throttled') return sample;
     return {
       ...sample,

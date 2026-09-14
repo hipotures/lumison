@@ -8,7 +8,6 @@ import {
   advanceTransientStore,
   applyPreset,
   applySnapshot,
-  canonicalInfluenceToFixed,
   createClocks,
   createSpatialInfluence,
   createState,
@@ -318,21 +317,6 @@ test('equal physical x/y movement has aspect-independent canonical direction', (
   close(landscapeB.y - landscapeA.y, 0.1);
   close(portraitB.x - portraitA.x, 0.1);
   close(portraitB.y - portraitA.y, 0.1);
-});
-
-test('Fixed compatibility mapping reconstructs historical UV and velocity units', () => {
-  const fixed = canonicalInfluenceToFixed(createSpatialInfluence({
-    position: { x: 0.5, y: 0.25 },
-    velocity: { x: 2, y: -1 },
-    radius: 0.16,
-    strength: 1,
-    positionValid: true,
-  }), 2);
-  close(fixed.x, 0.75);
-  close(fixed.y, 0.75);
-  close(fixed.vx, 1);
-  close(fixed.vy, -1);
-  assert.equal(fixed.strength, 1);
 });
 
 function simulateVelocity(frequency, duration = 0.5, speed = { x: 1.2, y: -0.4 }) {

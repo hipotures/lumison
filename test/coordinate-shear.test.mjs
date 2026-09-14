@@ -234,11 +234,10 @@ test('shear validation rejects bad settings without corrupting configuration', (
   });
 });
 
-test('passive, press, translation, shear and legacy responses configure independently', () => {
+test('passive, press, translation, shear responses configure independently', () => {
   const engine = new TflEngine();
   engine.setMotionWarp({ enabled: true, gain: 1.3 });
   engine.setActiveDeformation({
-    legacyFixedEnabled: false,
     pressEnabled: true,
     pressGain: -0.8,
     dragEnabled: false,
@@ -249,7 +248,6 @@ test('passive, press, translation, shear and legacy responses configure independ
 
   assert.equal(engine.getMotionWarpConfiguration().enabled, true);
   assert.deepEqual(engine.getActiveDeformationConfiguration(), {
-    legacyFixedEnabled: false,
     pressEnabled: true,
     pressGain: -0.8,
     dragEnabled: false,
@@ -265,7 +263,6 @@ test('passive, press, translation, shear and legacy responses configure independ
   assert.equal(engine.getMotionWarpConfiguration().enabled, true);
   assert.equal(engine.getActiveDeformationConfiguration().pressEnabled, true);
   assert.equal(engine.getActiveDeformationConfiguration().dragEnabled, false);
-  assert.equal(engine.getActiveDeformationConfiguration().legacyFixedEnabled, false);
 });
 
 test('coordinate shear defaults off in the Phase 3B-compatible render payload', () => {

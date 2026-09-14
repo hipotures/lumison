@@ -192,7 +192,6 @@ test('default membrane payload is an exact disabled Phase 3D compatibility state
   assert.equal(rendered.membraneResponse.enabled, false);
   assert.equal(rendered.membraneResponse.effectiveStrength, 0);
   assert.equal(rendered.membraneResponse.activeWaveCount, 0);
-  assert.equal(rendered.activeDeformation.legacyFixedEnabled, true);
 });
 
 test('equal membrane influence, event and dt sequences replay identically', () => {

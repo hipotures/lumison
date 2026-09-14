@@ -29,7 +29,6 @@ test('Legacy Fixed is the deterministic default and invalid modes are rejected',
   const state = createNormalEvaluationState();
   assert.deepEqual(normalEvaluationConfiguration(state), NORMAL_EVALUATION_DEFAULTS);
   assert.equal(normalEvaluationRenderState(state, 'High').shaderMode, 0);
-  assert.equal(normalEvaluationRenderState(state, 'High').legacyExplicitTilt, true);
 
   const changed = configureNormalEvaluation(state, {
     mode: NORMAL_EVALUATION_MODES.DISPLACED_GEOMETRY,
@@ -230,6 +229,5 @@ test('renderer payload and diagnostics expose the selected normal policy', () =>
   engine.setNormalEvaluation({ mode: NORMAL_EVALUATION_MODES.DISPLACED_GEOMETRY });
   engine.render();
   assert.equal(rendered.normalEvaluation.shaderMode, 1);
-  assert.equal(rendered.normalEvaluation.legacyExplicitTilt, false);
   assert.equal(engine.diagnostics().normalEvaluation.mode, 'Displaced Geometry');
 });

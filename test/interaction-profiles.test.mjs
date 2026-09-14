@@ -36,37 +36,11 @@ test('profiles change interaction configuration only', () => {
   engine.setNormalEvaluation({ mode: 'Displaced Geometry' });
   const before = visualState(engine);
 
-  for (const name of ['Qwen-like', 'Mobile-like', 'Fixed baseline']) {
+  for (const name of ['Qwen-like', 'Mobile-like']) {
     const result = applyInteractionProfile(engine, labState, name);
     assert.equal(result.ok, true);
     assert.deepEqual(visualState(engine), before, name);
   }
-});
-
-test('Fixed profile reproduces the previous compatibility interaction settings', () => {
-  const engine = new TflEngine();
-  const labState = createLabState();
-  applyInteractionProfile(engine, labState, 'Mobile-like');
-  const result = applyInteractionProfile(engine, labState, 'Fixed baseline');
-  assert.equal(result.ok, true);
-  assert.deepEqual(engine.getMotionWarpConfiguration(), INTERACTION_PROFILES['Fixed baseline'].motionWarp);
-  assert.deepEqual(
-    engine.getActiveDeformationConfiguration(),
-    INTERACTION_PROFILES['Fixed baseline'].activeDeformation,
-  );
-  assert.deepEqual(
-    engine.getCoordinateShearConfiguration(),
-    INTERACTION_PROFILES['Fixed baseline'].coordinateShear,
-  );
-  assert.deepEqual(
-    engine.getRippleDisplacementConfiguration(),
-    INTERACTION_PROFILES['Fixed baseline'].rippleDisplacement,
-  );
-  assert.deepEqual(
-    engine.getMembraneResponseConfiguration(),
-    INTERACTION_PROFILES['Fixed baseline'].membraneResponse,
-  );
-  assert.equal(labState.interactionProfile, 'Fixed baseline');
 });
 
 test('Qwen-like and Mobile-like keep their mechanism identities separate', () => {

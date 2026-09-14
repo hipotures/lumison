@@ -4,7 +4,6 @@
 // Fixed response remains enabled for compatibility.
 
 export const ACTIVE_DEFORMATION_DEFAULTS = Object.freeze({
-  legacyFixedEnabled: true,
   pressEnabled: false,
   pressGain: 1,
   dragEnabled: false,
@@ -33,7 +32,7 @@ export const ACTIVE_DEFORMATION_CALIBRATION = Object.freeze({
 });
 
 const CONFIGURATION_KEYS = Object.keys(ACTIVE_DEFORMATION_DEFAULTS);
-const BOOLEAN_KEYS = new Set(['legacyFixedEnabled', 'pressEnabled', 'dragEnabled']);
+const BOOLEAN_KEYS = new Set(['pressEnabled', 'dragEnabled']);
 
 export function createActiveDeformationState(configuration = {}) {
   const state = {

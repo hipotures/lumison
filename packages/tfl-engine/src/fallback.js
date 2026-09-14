@@ -29,7 +29,7 @@ export function createFallback(canvas) {
     return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
   }
 
-  function frame(state, time, pointer) {
+  function frame(state, time) {
     const s = state.current;
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#070b12';
@@ -64,18 +64,6 @@ export function createFallback(canvas) {
       const bh = h * 0.16;
       ctx.fillRect(-w, -h / 2 + (i * h) / bands - h / 2 + ((time * 20 * speed * (i % 2 ? 1 : -1)) % (h / bands)), 2 * w, bh);
       ctx.restore();
-    }
-    // Pointer glow.
-    if (pointer.strength > 0.02) {
-      ctx.globalCompositeOperation = 'lighter';
-      const g = ctx.createRadialGradient(
-        pointer.x * w, (1 - pointer.y) * h, 0,
-        pointer.x * w, (1 - pointer.y) * h, 130 * (0.5 + pointer.strength),
-      );
-      g.addColorStop(0, `rgba(180,240,255,${0.25 * Math.min(1, pointer.strength)})`);
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
     }
     ctx.globalCompositeOperation = 'source-over';
     // Grain.

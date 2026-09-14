@@ -3,7 +3,6 @@
 // trigger policy; it never includes film, optical, lighting or render values.
 
 export const INTERACTION_PROFILE_NAMES = Object.freeze([
-  'Fixed baseline',
   'Qwen-like',
   'Mobile-like',
   'Custom',
@@ -12,37 +11,9 @@ export const INTERACTION_PROFILE_NAMES = Object.freeze([
 export const MEMBRANE_WAVE_DRAG_SPACING = 0.14;
 
 export const INTERACTION_PROFILES = deepFreeze({
-  'Fixed baseline': {
-    motionWarp: { enabled: false, gain: 1, radius: 0.19 },
-    activeDeformation: {
-      legacyFixedEnabled: true,
-      pressEnabled: false,
-      pressGain: 1,
-      dragEnabled: false,
-      dragGain: 1,
-      radius: 0.19,
-    },
-    coordinateShear: { enabled: false, gain: 1 },
-    rippleDisplacement: { enabled: false, gain: 1 },
-    membraneResponse: {
-      enabled: false,
-      radialGain: 1,
-      tangentialGain: 1,
-      radius: 0.48,
-      waveEnabled: true,
-      waveGain: 1,
-    },
-    triggers: {
-      rippleOnClick: true,
-      rippleDuringDrag: false,
-      membraneWaveOnPress: true,
-      membraneWaveDuringDrag: false,
-    },
-  },
   'Qwen-like': {
     motionWarp: { enabled: true, gain: 1, radius: 0.19 },
     activeDeformation: {
-      legacyFixedEnabled: false,
       pressEnabled: true,
       pressGain: 1,
       dragEnabled: true,
@@ -69,7 +40,6 @@ export const INTERACTION_PROFILES = deepFreeze({
   'Mobile-like': {
     motionWarp: { enabled: false, gain: 1, radius: 0.19 },
     activeDeformation: {
-      legacyFixedEnabled: false,
       pressEnabled: false,
       pressGain: 1,
       dragEnabled: false,

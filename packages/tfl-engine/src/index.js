@@ -75,7 +75,6 @@ export {
 } from './motion-warp.js';
 export {
   advanceInfluenceDynamics,
-  canonicalInfluenceToFixed,
   createSpatialInfluence,
   FIXED_INFLUENCE_RADIUS,
   normalizedViewportToSurface,

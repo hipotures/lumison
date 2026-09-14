@@ -80,7 +80,6 @@ export function normalEvaluationRenderState(state, quality = 'High') {
     mode,
     shaderMode: NORMAL_EVALUATION_SHADER_MODES[mode],
     displacedGeometry: displaced,
-    legacyExplicitTilt: !displaced,
     normalHeightSamples: displaced && !central ? 3 : central ? 4 : 2,
     displacementEvaluations: displaced ? (central ? 4 : 2) : 0,
   };

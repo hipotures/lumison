@@ -147,7 +147,6 @@ export function pushFrameUniforms(stage, state, env) {
     aspect: env.aspect,
     width: env.bufW,
     height: env.bufH,
-    pointer: env.pointer,
     motionWarp: env.motionWarp,
     activeDeformation: env.activeDeformation,
     coordinateShear: env.coordinateShear,

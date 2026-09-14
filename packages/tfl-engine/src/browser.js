@@ -11,7 +11,6 @@ import {
   rendererStats,
 } from './renderer.js';
 import { createFallback } from './fallback.js';
-import { canonicalInfluenceToFixed } from './spatial.js';
 
 export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
   if (!canvas || !fallbackCanvas) throw new Error('Browser render host requires GPU and fallback canvases');
@@ -44,7 +43,6 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
 
     render({
       state,
-      influence,
       motionWarp,
       activeDeformation,
       coordinateShear,
@@ -54,11 +52,6 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
       renderScale,
     }) {
       const aspect = logicalAspect();
-      const fixedInfluence = canonicalInfluenceToFixed(
-        influence,
-        aspect,
-        { enabled: activeDeformation?.legacyFixedEnabled !== false },
-      );
       try {
         if (host.renderer && host.stage) {
           try { host.renderer.info?.reset?.(); } catch { /* statistics only */ }
@@ -68,11 +61,6 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
             aspect: fittedAspect,
             bufW: fit.bufW,
             bufH: fit.bufH,
-            pointer: canonicalInfluenceToFixed(
-              influence,
-              fittedAspect,
-              { enabled: activeDeformation?.legacyFixedEnabled !== false },
-            ),
             motionWarp,
             activeDeformation,
             coordinateShear,
@@ -83,7 +71,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
           host.renderer.render(host.stage.scene, host.stage.camera);
           return { aspect: fittedAspect };
         }
-        if (host.fallback) host.fallback.frame(state, state.clocks.animation, fixedInfluence);
+        if (host.fallback) host.fallback.frame(state, state.clocks.animation);
       } catch (error) {
         console.error(error);
         if (host.renderer) {

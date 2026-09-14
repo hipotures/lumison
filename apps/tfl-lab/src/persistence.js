@@ -9,7 +9,7 @@ export function createLabState() {
     rippleDuringDrag: false,
     membraneWaveOnPress: true,
     membraneWaveDuringDrag: false,
-    interactionProfile: 'Fixed baseline',
+    interactionProfile: 'Custom',
   };
 }
 
@@ -41,7 +41,7 @@ export function applyLabSnapshot(engine, labState, saved, options = {}) {
   if (typeof saved.membraneWaveDuringDrag === 'boolean') {
     labState.membraneWaveDuringDrag = saved.membraneWaveDuringDrag;
   }
-  if (['Fixed baseline', 'Qwen-like', 'Mobile-like', 'Custom'].includes(saved.interactionProfile)) {
+  if (['Qwen-like', 'Mobile-like', 'Custom'].includes(saved.interactionProfile)) {
     labState.interactionProfile = saved.interactionProfile;
   } else if (saved.interactions) {
     // Phase 3A-D snapshots predate named profiles and may contain arbitrary
@@ -80,5 +80,5 @@ export function resetLabUiState(labState) {
   labState.rippleDuringDrag = false;
   labState.membraneWaveOnPress = true;
   labState.membraneWaveDuringDrag = false;
-  labState.interactionProfile = 'Fixed baseline';
+  labState.interactionProfile = 'Custom';
 }

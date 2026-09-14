@@ -3,7 +3,7 @@
 // Physical picture (approximate but causal):
 //   flow field  -> warped, advected coordinates (transport + vortices)
 //   thickness   -> nanometre film height from multi-scale structure,
-//                  drainage gradient, surface-tension smoothing, pointer dent
+//                  drainage gradient, surface-tension smoothing
 //   normals     -> finite differences of the thickness field
 //   interference-> wavelength-dependent phase from optical path difference
 //                  2 * n(lambda) * h * cos(theta), sampled at N wavelengths
@@ -130,8 +130,6 @@ export function createFilmMaterial(qualityName) {
     uTime: uniform(0),
     uAspect: uniform(1.0),
     uRes: uniform(new Vector2(1, 1)),
-    uPointer: uniform(new Vector4(0.5, 0.5, 0.0, 0.16)),
-    uPointerVel: uniform(new Vector2(0, 0)),
     // Canonical position/radius plus a separately integrated displacement.
     // W gates the optional response; zero is the exact Fixed-compatible path.
     uMotionWarp: uniform(new Vector4(0, 0, 0.19, 0)),
@@ -182,7 +180,7 @@ export function createFilmMaterial(qualityName) {
       )),
     ),
     uMembraneWaveEnabled: uniform(0),
-    // 0 = behavior-compatible legacy Fixed sampling/tilt policy,
+    // 0 = behavior-compatible legacy Fixed sampling policy,
     // 1 = recompute spatial displacement for every normal height tap.
     uNormalMode: uniform(0),
     uMode: uniform(0),
@@ -390,38 +388,16 @@ export function createFilmMaterial(qualityName) {
 
   // Height used only by Displaced Geometry normal taps. It intentionally keeps
   // Fixed's calmer tap field (no capillary fine term and softened creases), but
-  // applies all spatial mechanisms, the late legacy coordinate push, drainage,
-  // pooling, dent, scalar ripple and scalar thickness shear at the tap's own
-  // location. Those scalar terms are included because they change surface
-  // height; lighting/emission/color terms are not part of this function.
+  // applies all spatial mechanisms, drainage and pooling at the tap's own
+  // location. Lighting/emission/color terms are not part of this function.
   function displacedNormalHeightAt(fixedCoordinate, knownStructuralCoordinate = null) {
     const structuralCoordinate = knownStructuralCoordinate
       ?? displacedStructuralCoordinate(fixedCoordinate);
     const pack = advected(structuralCoordinate);
-    const pointerCanonical = vec2(
-      U.uPointer.x.sub(0.5).mul(U.uAspect),
-      U.uPointer.y.sub(0.5),
-    );
-    const pointerDelta = fixedCoordinate.mul(0.5).sub(pointerCanonical);
-    const pointerDistance2 = pointerDelta.dot(pointerDelta);
-    const pointerVelocity = vec2(U.uPointerVel.x.mul(U.uAspect), U.uPointerVel.y);
-    const push = exp(pointerDistance2.div(-0.035)).mul(U.uPointer.z);
-    const pushedPack = {
-      adv: pack.adv.add(pointerVelocity.mul(push.mul(1.05))),
-      warp: pack.warp,
-      drift: pack.drift,
-    };
-    const thickness = thicknessAt(pushedPack, false, true);
+    const thickness = thicknessAt(pack, false, true);
     const drainage = U.uDrain.mul(fixedCoordinate.y.mul(0.5)).mul(-0.5);
     const pooling = U.uDrain.mul(thickness.cells.sub(0.62)).mul(0.38);
-    const radialDistance = sqrt(pointerDistance2.add(1e-5));
-    const dent = exp(pointerDistance2.div(-0.026)).mul(U.uPointer.z);
-    const scalarRipple = sin(radialDistance.mul(42.0).sub(U.uTime.mul(7.0)))
-      .mul(exp(radialDistance.mul(-6.0))).mul(U.uPointer.z.mul(0.18));
-    const thicknessShear = pointerDelta.dot(pointerVelocity)
-      .mul(exp(pointerDistance2.div(-0.045))).mul(U.uPointer.z.mul(-0.20));
-    const heightField = thickness.field.add(drainage).add(pooling)
-      .add(dent.mul(0.82)).add(scalarRipple).add(thicknessShear);
+    const heightField = thickness.field.add(drainage).add(pooling);
     return max(toNm(heightField), 34.0);
   }
 
@@ -446,27 +422,11 @@ export function createFilmMaterial(qualityName) {
     );
 
     const pack0 = advected(structuralSt);
-    // Pointer push: velocity advects coordinates near the cursor.
-    const pd = fullUv.sub(U.uPointer.xy);
-    // Screen-space metric: UV x spans `aspect` times more pixels than UV y.
-    // Scaling X (not Y) keeps click/drag influence circular on wide canvases.
-    const pdMetric = vec2(pd.x.mul(U.uAspect), pd.y);
-    const pdd = pdMetric.dot(pdMetric);
-    const pointerVelMetric = vec2(U.uPointerVel.x.mul(U.uAspect), U.uPointerVel.y);
-    const push = exp(pdd.div(-0.035)).mul(U.uPointer.z);
-    const advPushed = pack0.adv.add(pointerVelMetric.mul(push.mul(1.05)));
-
-    const t0 = thicknessAt({ adv: advPushed, warp: pack0.warp, drift: pack0.drift });
+    const t0 = thicknessAt(pack0);
     // Drainage: vertical thinning gradient + pooling inside cells.
     const drainGrad = U.uDrain.mul(fullUv.y.sub(0.5)).mul(-0.5);
     const pool = U.uDrain.mul(t0.cells.sub(0.62)).mul(0.38);
-    // Pointer dent + decaying ripple rings.
-    const pr = sqrt(pdd.add(1e-5));
-    const dent = exp(pdd.div(-0.026)).mul(U.uPointer.z);
-    const ripple = sin(pr.mul(42.0).sub(U.uTime.mul(7.0)))
-      .mul(exp(pr.mul(-6.0))).mul(U.uPointer.z.mul(0.18));
-    const dragShear = pdMetric.dot(pointerVelMetric).mul(exp(pdd.div(-0.045))).mul(U.uPointer.z.mul(-0.20));
-    const field = t0.field.add(drainGrad).add(pool).add(dent.mul(0.82)).add(ripple).add(dragShear);
+    const field = t0.field.add(drainGrad).add(pool);
 
     const hNm = toNm(field);
     const h = max(hNm, 34.0);
@@ -550,21 +510,6 @@ export function createFilmMaterial(qualityName) {
       const m2 = vnoise(structuralSt.mul(59.0).sub(vec2(U.uTime.mul(0.3), 0.0))).sub(0.5);
       N.assign(normalize(N.add(vec3(m1, m2, float(0.0)).mul(U.uFine.mul(0.13)))));
     }
-    // Historical explicit radial/directional tilt is compensation for Fixed's
-    // inconsistent height taps. Retain it exactly in Legacy mode and omit it
-    // from Displaced Geometry mode to avoid counting deformation twice.
-    If(U.uNormalMode.equal(0), () => {
-      const pointerProfile = exp(pdd.div(-0.030)).mul(U.uPointer.z);
-      const radialTilt = pdMetric.mul(pointerProfile.mul(4.2));
-      const dragTilt = pointerVelMetric.mul(
-        exp(pdd.div(-0.050)).mul(U.uPointer.z.mul(0.42)),
-      );
-      N.assign(normalize(N.add(vec3(
-        radialTilt.x.add(dragTilt.x).negate(),
-        radialTilt.y.add(dragTilt.y).negate(),
-        0.0,
-      ))));
-    });
 
     // --- lighting (independent slow orbit) ---
     const V = vec3(0.0, 0.0, 1.0);
@@ -656,8 +601,6 @@ export function updateUniforms(U, s, env) {
   U.uTime.value = env.time;
   U.uAspect.value = env.aspect;
   U.uRes.value.set(env.width, env.height);
-  U.uPointer.value.set(env.pointer.x, env.pointer.y, env.pointer.strength, 0.16);
-  U.uPointerVel.value.set(env.pointer.vx, env.pointer.vy);
   const motionWarp = env.motionWarp;
   const motionEnabled = motionWarp?.enabled === true
     && motionWarp.effectiveStrength > 0;
@@ -774,7 +717,7 @@ export function updateUniforms(U, s, env) {
 // Approximate CPU mirror of the coarse thickness field, used only by the
 // probe readout (single-point evaluation, throttled). It evaluates the same
 // parametric structure — large-scale drifting fbm, cellular partitioning,
-// drainage gradient, pointer dent — at one UV location.
+// drainage gradient — at one UV location.
 function h2(x, y) {
   const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
   return s - Math.floor(s);
@@ -811,8 +754,8 @@ function fbm2(x, y, oct) {
   return acc * 1.032;
 }
 
-export function sampleFieldApprox(u, v, p, time, pointer) {
-  // p: smoothed params, time: sim seconds, pointer: {x,y,strength}
+export function sampleFieldApprox(u, v, p, time) {
+  // p: smoothed params, time: sim seconds
   const tt = time * p.flowSpeed;
   const sx = (u - 0.5) * 2, sy = (v - 0.5) * 2;
   const px = sx * p.flowScale + tt * 0.021;
@@ -830,9 +773,6 @@ export function sampleFieldApprox(u, v, p, time, pointer) {
   const tm = Math.min(0.85, p.tension * 0.55);
   let field = detail * (1 - tm) + large * 1.08 * tm;
   field += p.drainage * (v - 0.5) * -0.5;
-  const dx = (u - pointer.x), dy = (v - pointer.y);
-  const d2 = dx * dx + dy * dy;
-  field += Math.exp(d2 / -0.02) * pointer.strength * 0.55;
   const h = Math.max(34, p.filmBase + (field - FIELD_MID) * NM_GAIN * p.thickVar);
   // gradient for normal + flow estimate
   const e = 0.004;

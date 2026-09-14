@@ -140,11 +140,6 @@ export function buildUI(root, state, labState, A) {
     'Profiles change interaction mechanisms only. Manual changes select Custom; film preset, optics, quality and locks stay untouched.',
   ));
   interaction.append(toggleRow(
-    'Legacy Fixed response (includes thickness shear)',
-    initialActiveDeformation.legacyFixedEnabled,
-    (legacyFixedEnabled) => A.activeDeformation({ legacyFixedEnabled }),
-  ));
-  interaction.append(toggleRow(
     'Passive Warp',
     initialMotionWarp.enabled,
     (enabled) => A.motionWarp({ enabled }),
@@ -159,7 +154,7 @@ export function buildUI(root, state, labState, A) {
   );
   interaction.append(passiveGain.root, passiveRadius.root);
   interaction.append(hint(
-    'Optional GPU domain displacement from motion. Off preserves the Fixed hover baseline; Canvas2D cannot reproduce this structural effect.',
+    'Optional GPU domain displacement from motion. Canvas2D cannot reproduce this structural effect.',
   ));
   interaction.append(toggleRow(
     'Active Press',
@@ -258,7 +253,7 @@ export function buildUI(root, state, labState, A) {
     (enabled) => A.membraneWaveDuringDrag(enabled),
   ));
   interaction.append(hint(
-    'All enabled mechanisms alter structural coordinates. Qwen ripples and Mobile membrane waves are separate anchored event types. The legacy toggle includes Fixed\'s scalar thickness shear.',
+    'All enabled mechanisms alter structural coordinates. Qwen ripples and Mobile membrane waves are separate anchored event types.',
   ));
 
   // ---- rendering extras ----
@@ -286,7 +281,7 @@ export function buildUI(root, state, labState, A) {
   }));
   vsec.append(kvRow('Normal evaluation', normalModeSelect));
   vsec.append(hint(
-    'Legacy Fixed preserves its compensation tilt. Displaced Geometry derives lighting normals from the same spatially deformed height field; use the Normal view to compare.',
+    'Legacy Fixed samples around the displaced center. Displaced Geometry derives lighting normals from the same spatially deformed height field; use the Normal view to compare.',
   ));
   vsec.append(kvRow('Diagnostic view (D)', diagSelect()));
   vsec.append(toggleRow('Surface probe', labState.probe, (v) => A.probe(v)));
@@ -406,8 +401,6 @@ export function buildUI(root, state, labState, A) {
     passiveRadius.input.value = String(motionWarp.radius);
     passiveRadius.output.textContent = formatNum(motionWarp.radius, 0.01);
     const active = A.activeDeformationConfiguration();
-    const legacy = root.querySelector('input[aria-label="Legacy Fixed response (includes thickness shear)"]');
-    if (legacy) legacy.checked = active.legacyFixedEnabled;
     const press = root.querySelector('input[aria-label="Active Press"]');
     if (press) press.checked = active.pressEnabled;
     activePressGain.input.value = String(active.pressGain);
