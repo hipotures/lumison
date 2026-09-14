@@ -9,6 +9,8 @@ import {
   TflEngine,
 } from '../../../packages/tfl-engine/src/index.js';
 import { createBrowserRenderHost } from '../../../packages/tfl-engine/src/browser.js';
+import { isWebGPUAvailable } from '../../../packages/tfl-engine/src/renderer.js';
+import { createFpsHistory } from './fps-history.js';
 import { createPointerAdapter } from './input.js';
 import { createSpatialEventTriggerPolicy } from './ripple-trigger.js';
 import {
@@ -79,7 +81,7 @@ async function boot() {
     && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const state = createState({ reduceMotion });
   const labState = createLabState();
-  const canvas = document.getElementById('stage');
+  let canvas = document.getElementById('stage');
   const fallbackCanvas = document.getElementById('fallback2d');
   const panel = document.getElementById('panel');
   const fab = document.getElementById('panelFab');
@@ -95,6 +97,8 @@ async function boot() {
     rippleTriggers: null,
     membraneTriggers: null,
   };
+  const fpsHistory = createFpsHistory();
+  let webgpuAvailable = false;
 
   const renderHost = createBrowserRenderHost({ canvas, fallbackCanvas });
   const engine = new TflEngine({
@@ -206,7 +210,6 @@ async function boot() {
     const diagnostic = engine.diagnostics(app.displayHz);
     const statistics = diagnostic.stats;
     const lines = [
-      `backend  <b>${diagnostic.backend}</b>`,
       `fps      <b>${diagnostic.fps.toFixed(1)}</b>  frame <b>${diagnostic.frameMs.toFixed(2)} ms</b>`,
       `buffer   ${diagnostic.bufferWidth === null ? 'n/a (2d)' : `${diagnostic.bufferWidth}×${diagnostic.bufferHeight} px`}  ratio <b>${diagnostic.ratio === null ? '—' : diagnostic.ratio.toFixed(2)}</b>`,
       `dpr      ${(window.devicePixelRatio || 1).toFixed(2)}  scale req/cur/eff <b>${diagnostic.requestedScale.toFixed(2)} / ${diagnostic.currentScale.toFixed(2)} / ${diagnostic.effectiveScale.toFixed(2)}</b>`,
@@ -232,6 +235,21 @@ async function boot() {
   }
 
   const actions = {
+    backend: () => renderHost.backend,
+    webgpuAvailable: () => webgpuAvailable,
+    switchBackend: async (backend) => {
+      try {
+        canvas = await renderHost.switchBackend(backend, {
+          msaa: state.msaa, quality: state.quality,
+        });
+        app.pointer.rebind(canvas, [fallbackCanvas]);
+        bindPointerEvents();
+        updateDiagnostics();
+      } catch (error) {
+        toast(`Backend switch failed: ${error?.message ?? error}`);
+        if (backend === 'WebGPU') webgpuAvailable = await isWebGPUAvailable();
+      }
+    },
     persistSoon,
     param: (name, value) => { if (engine.setParameter(name, value).changed) persistSoon(); },
     resetParam: (name) => {
@@ -448,32 +466,39 @@ async function boot() {
       engine.emitTransientEvent(createMembraneWaveEvent({ origin }));
     }
   };
-  for (const target of [canvas, fallbackCanvas]) {
-    target.addEventListener('pointermove', () => {
-      submitInfluence();
-      if (app.pointer.influence.engaged) {
-        emitRippleOrigins(app.rippleTriggers.move(app.pointer.influence.position));
-        emitMembraneOrigins(app.membraneTriggers.move(app.pointer.influence.position));
-      }
-      if (labState.probe) updateProbe(false);
-    });
-    target.addEventListener('pointerdown', () => {
-      submitInfluence();
-      if (app.pointer.influence.engaged) {
-        emitRippleOrigins(app.rippleTriggers.begin(app.pointer.influence.position));
-        emitMembraneOrigins(app.membraneTriggers.begin(app.pointer.influence.position));
-      }
-      if (labState.probe) updateProbe(true);
-    });
-    target.addEventListener('pointerup', () => {
-      app.rippleTriggers.end();
-      app.membraneTriggers.end();
-    });
-    target.addEventListener('pointercancel', () => {
-      app.rippleTriggers.end();
-      app.membraneTriggers.end();
-    });
+  let pointerBindings;
+  function bindPointerEvents() {
+    pointerBindings?.abort();
+    pointerBindings = new AbortController();
+    const options = { signal: pointerBindings.signal };
+    for (const target of [canvas, fallbackCanvas]) {
+      target.addEventListener('pointermove', () => {
+        submitInfluence();
+        if (app.pointer.influence.engaged) {
+          emitRippleOrigins(app.rippleTriggers.move(app.pointer.influence.position));
+          emitMembraneOrigins(app.membraneTriggers.move(app.pointer.influence.position));
+        }
+        if (labState.probe) updateProbe(false);
+      }, options);
+      target.addEventListener('pointerdown', () => {
+        submitInfluence();
+        if (app.pointer.influence.engaged) {
+          emitRippleOrigins(app.rippleTriggers.begin(app.pointer.influence.position));
+          emitMembraneOrigins(app.membraneTriggers.begin(app.pointer.influence.position));
+        }
+        if (labState.probe) updateProbe(true);
+      }, options);
+      target.addEventListener('pointerup', () => {
+        app.rippleTriggers.end();
+        app.membraneTriggers.end();
+      }, options);
+      target.addEventListener('pointercancel', () => {
+        app.rippleTriggers.end();
+        app.membraneTriggers.end();
+      }, options);
+    }
   }
+  bindPointerEvents();
 
   window.addEventListener('keydown', (event) => {
     const target = event.target;
@@ -493,12 +518,23 @@ async function boot() {
   observer.observe(document.body);
   window.addEventListener('orientationchange', () => engine.resize());
   document.addEventListener('fullscreenchange', () => setTimeout(() => engine.resize(), 60));
-  document.addEventListener('visibilitychange', () => { app.lastFrame = performance.now(); });
+  document.addEventListener('visibilitychange', () => {
+    app.lastFrame = performance.now();
+    fpsHistory.suspend();
+  });
 
   bootMsg('Measuring display refresh…');
   app.displayHz = await measurePresentationHz();
   bootMsg('Initializing WebGPU renderer…');
   await engine.initialize({ onProgress: bootMsg });
+  webgpuAvailable = renderHost.backend === 'WebGPU';
+  updateDiagnostics();
+  if (!webgpuAvailable) {
+    isWebGPUAvailable().then((available) => {
+      webgpuAvailable = available;
+      updateDiagnostics();
+    });
+  }
   document.getElementById('boot')?.classList.add('done');
 
   const frame = () => {
@@ -506,7 +542,12 @@ async function boot() {
     let dt = (now - app.lastFrame) / 1000;
     app.lastFrame = now;
     if (!(dt >= 0) || dt > 0.25) dt = 0.025;
-    if (document.hidden) { requestAnimationFrame(frame); return; }
+    if (document.hidden) {
+      fpsHistory.suspend();
+      requestAnimationFrame(frame);
+      return;
+    }
+    if (fpsHistory.frame(now)) app.ui.setFpsHistory(fpsHistory.samples);
 
     app.pointer.advance(dt);
     submitInfluence();

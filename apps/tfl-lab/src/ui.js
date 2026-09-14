@@ -53,10 +53,49 @@ export function buildUI(root, state, labState, A) {
   }
   fixed.append(actions);
   const footer = el('div', 'panel-footer');
-  const diag = el('aside', 'diagnostics-hud', 'starting…');
+  const diag = el('aside', 'diagnostics-hud');
   diag.id = 'diag';
   diag.hidden = true;
   diag.setAttribute('aria-label', 'Diagnostics');
+  const backendSelect = el('select');
+  backendSelect.setAttribute('aria-label', 'GPU backend');
+  for (const backend of ['WebGPU', 'WebGL2']) {
+    const option = el('option', '', backend);
+    option.value = backend;
+    backendSelect.append(option);
+  }
+  const backendStatus = el('span');
+  const backendControl = el('div', 'backend-control');
+  backendControl.append(backendStatus, backendSelect);
+  diag.append(kvRow('backend', backendControl));
+  let switchingBackend = false;
+  function syncBackend() {
+    const backend = A.backend();
+    backendSelect.value = backend;
+    backendStatus.textContent = ['WebGPU', 'WebGL2'].includes(backend) ? '' : backend;
+    backendSelect.options[0].disabled = !A.webgpuAvailable();
+    backendSelect.disabled = switchingBackend || backend === 'starting';
+  }
+  backendSelect.addEventListener('change', async () => {
+    const requested = backendSelect.value;
+    switchingBackend = true;
+    syncBackend();
+    try { await A.switchBackend(requested); }
+    finally {
+      switchingBackend = false;
+      syncBackend();
+    }
+  });
+  const graph = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  graph.classList.add('fps-history');
+  graph.setAttribute('viewBox', '0 0 300 64');
+  graph.setAttribute('preserveAspectRatio', 'none');
+  graph.setAttribute('role', 'img');
+  graph.setAttribute('aria-label', 'FPS history: waiting for samples');
+  const graphStats = el('div', 'fps-history-stats', 'FPS · last 120 seconds');
+  const diagText = el('div', '', 'starting…');
+  diag.append(graph, graphStats, diagText);
+  syncBackend();
   footer.append(toggleRow('Diagnostics', false, (enabled) => {
     diag.hidden = !enabled;
   }));
@@ -469,11 +508,29 @@ export function buildUI(root, state, labState, A) {
   }
 
   function setDiag(html) {
-    diag.innerHTML = html;
+    diagText.innerHTML = html;
+    syncBackend();
+  }
+
+  function setFpsHistory(samples) {
+    const maximum = Math.max(60, Math.ceil(Math.max(...samples) / 30) * 30);
+    const y = (fps) => 60 - fps / maximum * 54;
+    const references = [30, 60].map((fps) =>
+      `<line x1="0" y1="${y(fps)}" x2="300" y2="${y(fps)}"/><text x="2" y="${y(fps) - 2}">${fps}</text>`,
+    ).join('');
+    const points = samples.map((fps, index) =>
+      `${(120 - samples.length + index) / 119 * 300},${y(fps)}`,
+    ).join(' ');
+    graph.innerHTML = `${references}<polyline points="${points}"/><circle cx="300" cy="${y(samples.at(-1))}" r="1.5"/>`;
+    const min = Math.min(...samples).toFixed(0);
+    const avg = (samples.reduce((sum, fps) => sum + fps, 0) / samples.length).toFixed(0);
+    const max = Math.max(...samples).toFixed(0);
+    graphStats.textContent = `FPS · ${samples.length}s / 120s · min ${min} / avg ${avg} / max ${max}`;
+    graph.setAttribute('aria-label', graphStats.textContent);
   }
 
   sync();
-  return { sync, setDiag };
+  return { sync, setDiag, setFpsHistory };
 }
 
 function el(tag, cls, text) {

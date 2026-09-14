@@ -22,6 +22,33 @@ export function backendName(renderer) {
 }
 
 export async function createRenderer(canvas, opts) {
+  const requestedBackend = normalizeRequestedBackend(opts.backend);
+  if (requestedBackend !== 'auto') {
+    const renderer = new WebGPURenderer({
+      canvas,
+      antialias: (opts.msaa ?? 0) > 0,
+      forceWebGL: requestedBackend === 'WebGL2',
+      powerPreference: 'high-performance',
+    });
+    // Three r185 installs this fallback internally, overriding constructor
+    // options. Explicit WebGPU requests must fail instead of taking it.
+    renderer._getFallback = null;
+    renderer.toneMapping = NoToneMapping;
+    const initialization = renderer.init();
+    try {
+      await withTimeout(initialization, 12000, `${requestedBackend} init timed out`);
+      if (backendName(renderer) !== requestedBackend) {
+        throw new Error(`Requested ${requestedBackend} is unavailable`);
+      }
+      return renderer;
+    } catch (error) {
+      try { renderer.dispose(); } catch { /* initialization may be incomplete */ }
+      initialization.then(() => {
+        try { renderer.dispose(); } catch { /* late initialization cleanup */ }
+      }, () => {});
+      throw error;
+    }
+  }
   const onProgress = opts.onProgress ?? (() => {});
   // Attempt 1: default path (WebGPU preferred, automatic WebGL2 fallback).
   // NOTE: navigator.gpu.requestAdapter() may pend forever on some systems
@@ -63,6 +90,24 @@ export async function createRenderer(canvas, opts) {
         `WebGPU path: ${err1?.message ?? err1}; WebGL2 path: ${err2?.message ?? err2}`,
       );
     }
+  }
+}
+
+export function normalizeRequestedBackend(value = 'auto') {
+  if (value === 'auto' || value === 'WebGPU' || value === 'WebGL2') return value;
+  throw new Error(`Unknown GPU backend: ${value}`);
+}
+
+export async function isWebGPUAvailable() {
+  if (!globalThis.navigator?.gpu) return false;
+  try {
+    return Boolean(await withTimeout(
+      navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }),
+      4000,
+      'WebGPU availability check timed out',
+    ));
+  } catch {
+    return false;
   }
 }
 

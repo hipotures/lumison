@@ -9,6 +9,7 @@ import {
   pushFrameUniforms,
   rebuildStageQuality,
   rendererStats,
+  normalizeRequestedBackend,
 } from './renderer.js';
 import { createFallback } from './fallback.js';
 
@@ -24,6 +25,61 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
     fallback: null,
     lastFallbackReason: '',
     backendChange: null,
+    switching: false,
+    lastFrame: null,
+
+    async switchBackend(requested, { msaa, quality }) {
+      const backend = normalizeRequestedBackend(requested);
+      if (backend === 'auto') throw new Error('Choose WebGPU or WebGL2');
+      if (host.switching) throw new Error('Backend switch already in progress');
+      if (backend === host.backend && host.hasGpu()) return canvas;
+      host.switching = true;
+      let renderer;
+      let stage;
+      try {
+        const replacementCanvas = canvas.cloneNode(false);
+        replacementCanvas.hidden = false;
+        renderer = await createRenderer(replacementCanvas, { msaa, backend });
+        // Settings can change while initialization/compilation is pending.
+        do {
+          stage?.dispose();
+          stage = createFilmStage(renderer, host.stage?.quality ?? quality);
+          await renderer.compileAsync(stage.scene, stage.camera);
+        } while (stage.quality !== (host.stage?.quality ?? quality));
+        if (host.lastFrame) {
+          const fit = fitRenderer(renderer, replacementCanvas, host.lastFrame.renderScale);
+          pushFrameUniforms(stage, host.lastFrame.state, {
+            ...host.lastFrame,
+            aspect: fit.cssW / Math.max(1, fit.cssH),
+            bufW: fit.bufW,
+            bufH: fit.bufH,
+          });
+        }
+        // Validate the reconstructed stage before touching the working host.
+        renderer.render(stage.scene, stage.camera);
+        const oldRenderer = host.renderer;
+        const oldStage = host.stage;
+        canvas.replaceWith(replacementCanvas);
+        canvas = replacementCanvas;
+        host.canvas = canvas;
+        host.renderer = renderer;
+        host.stage = stage;
+        host.backend = backend;
+        host.fallback = null;
+        host.lastFallbackReason = '';
+        fallbackCanvas.hidden = true;
+        host.backendChange = { backend, fallback: false, quality: stage.quality, reason: '' };
+        try { oldStage?.dispose(); } catch { /* best-effort cleanup */ }
+        try { oldRenderer?.dispose(); } catch { /* best-effort cleanup */ }
+        return canvas;
+      } catch (error) {
+        try { stage?.dispose(); } catch { /* best-effort cleanup */ }
+        try { renderer?.dispose(); } catch { /* best-effort cleanup */ }
+        throw error;
+      } finally {
+        host.switching = false;
+      }
+    },
 
     async initialize({ msaa, quality, onProgress = () => {} }) {
       try {
@@ -51,6 +107,10 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
       normalEvaluation,
       renderScale,
     }) {
+      host.lastFrame = {
+        state, motionWarp, activeDeformation, coordinateShear,
+        rippleDisplacement, membraneResponse, normalEvaluation, renderScale,
+      };
       const aspect = logicalAspect();
       try {
         if (host.renderer && host.stage) {

@@ -16,7 +16,7 @@ export function createPointerAdapter(primaryCanvas, extraTargets = []) {
     normalizedPosition: { x: 0.5, y: 0.5 },
     lastTime: 0,
   };
-  const targets = [primaryCanvas, ...extraTargets].filter(Boolean);
+  let targets = [];
 
   function toSurface(event, clamp) {
     const target = event.currentTarget instanceof Element ? event.currentTarget : primaryCanvas;
@@ -93,14 +93,25 @@ export function createPointerAdapter(primaryCanvas, extraTargets = []) {
     if (!influence.engaged) influence.positionValid = false;
   };
 
-  for (const target of targets) {
-    target.addEventListener('pointerenter', onEnter);
-    target.addEventListener('pointerdown', onDown);
-    target.addEventListener('pointermove', onMove);
-    target.addEventListener('pointerup', release);
-    target.addEventListener('pointercancel', release);
-    target.addEventListener('pointerleave', onLeave);
-  }
+  const listeners = {
+    pointerenter: onEnter, pointerdown: onDown, pointermove: onMove,
+    pointerup: release, pointercancel: release, pointerleave: onLeave,
+  };
+  adapter.rebind = (canvas, extras = []) => {
+    for (const target of targets) {
+      for (const [type, listener] of Object.entries(listeners)) {
+        target.removeEventListener(type, listener);
+      }
+    }
+    primaryCanvas = canvas;
+    targets = [canvas, ...extras].filter(Boolean);
+    for (const target of targets) {
+      for (const [type, listener] of Object.entries(listeners)) {
+        target.addEventListener(type, listener);
+      }
+    }
+  };
+  adapter.rebind(primaryCanvas, extraTargets);
 
   adapter.advance = (dt) => {
     adapter.refreshViewport();
