@@ -94,6 +94,7 @@ export async function analyzeMidiSoundFont({
   measureLoudness = measureLoudnessInWorker,
   signal,
   onProgress = () => {},
+  onPhase = () => {},
 }) {
   throwIfAborted(signal);
   if (!(midiBuffer instanceof ArrayBuffer)) throw new TypeError('MIDI source returned no data');
@@ -121,6 +122,7 @@ export async function analyzeMidiSoundFont({
   };
 
   try {
+    onPhase('rendering');
     signal?.addEventListener('abort', stopOfflineSynth, { once: true });
     await context.audioWorklet.addModule(processorUrl);
     throwIfAborted(signal);
@@ -151,6 +153,10 @@ export async function analyzeMidiSoundFont({
       { length: rendered.numberOfChannels },
       (_, channel) => rendered.getChannelData(channel),
     );
+    // Rendering is complete. Release the offline synth before declaring that
+    // only worker-side metering remains; this phase may safely finish during Play.
+    stopOfflineSynth();
+    onPhase('metering');
     const measurement = await measureLoudness({
       channels,
       sampleRate: rendered.sampleRate,

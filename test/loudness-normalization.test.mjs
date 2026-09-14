@@ -225,3 +225,66 @@ test('starting MIDI playback cancels active normalization work without an error'
   assert.equal(engine.loudness.error, '');
   assert.equal(engine.loudness.cache.size, 0);
 });
+
+test('Play during final metering preserves work and caches one result across subsequent starts', async () => {
+  const transport = { playing: false, position: 0, rate: 1 };
+  let analyses = 0; let finish; let signal;
+  const engine = new SoundFontAudioEngine({
+    getTransport: () => transport,
+    loudnessAnalyzer: (options) => {
+      analyses += 1; signal = options.signal;
+      options.onPhase('metering'); options.onProgress(0.995);
+      return new Promise((resolve) => { finish = resolve; });
+    },
+  });
+  engine.loudness.setSources({ midiSource: source('midi'), soundFontSource: source('bank') });
+  engine.setLoudnessMode(LOUDNESS_MODE.NORMALIZE);
+  await new Promise((resolve) => setImmediate(resolve));
+  const pending = engine.analysisPromise;
+  assert.equal(engine.analysisPhase, 'metering');
+  for (let i = 0; i < 3; i++) {
+    transport.playing = true; engine.handleTransport('play');
+    engine.setLoudnessMode(LOUDNESS_MODE.NORMALIZE);
+    assert.equal(signal.aborted, false);
+    transport.playing = false; engine.handleTransport('pause');
+    assert.equal(engine.analysisPromise, pending);
+  }
+  transport.playing = true; engine.handleTransport('play');
+  finish({ measuredLufs: -20, measuredTruePeakDbTP: -5 });
+  await pending;
+  const result = engine.loudness.result;
+  assert.equal(engine.loudness.status, 'ready');
+  assert.equal(engine.loudness.cache.size, 1);
+  for (let i = 0; i < 3; i++) {
+    transport.playing = true; engine.handleTransport('play');
+    transport.playing = false; engine.handleTransport('stop');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(engine.loudness.result, result);
+  }
+  assert.equal(analyses, 1);
+  engine.destroy();
+});
+
+test('source changes and Original mode still cancel final metering', async () => {
+  for (const action of ['source', 'mode']) {
+    let signal;
+    const engine = new SoundFontAudioEngine({
+      getTransport: () => ({ playing: false, position: 0, rate: 1 }),
+      loudnessAnalyzer: (options) => {
+        signal = options.signal; options.onPhase('metering');
+        return new Promise((resolve, reject) => signal.addEventListener('abort', () => {
+          const error = new Error('cancelled'); error.name = 'AbortError'; reject(error);
+        }, { once: true }));
+      },
+    });
+    engine.loudness.setSources({ midiSource: source('midi'), soundFontSource: source('bank') });
+    engine.setLoudnessMode(LOUDNESS_MODE.NORMALIZE);
+    await new Promise((resolve) => setImmediate(resolve));
+    const pending = engine.analysisPromise;
+    if (action === 'source') engine.setMidiSource(null);
+    else engine.setLoudnessMode(LOUDNESS_MODE.ORIGINAL);
+    await pending;
+    assert.equal(signal.aborted, true); assert.equal(engine.loudness.cache.size, 0);
+    engine.destroy();
+  }
+});

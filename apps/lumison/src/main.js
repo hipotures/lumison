@@ -162,8 +162,9 @@ function createMidiUI({ engine, baseline, canvas }) {
       const statusText = {
         unavailable: 'Load MIDI + SoundFont',
         pending: 'Normalization pending',
-        analyzing: audio.loudness.progress > 0
-          ? `Analyzing… ${Math.round(audio.loudness.progress * 100)}%` : 'Analyzing…',
+        analyzing: audio.analysisPhase === 'metering' ? 'Measuring loudness…'
+          : audio.loudness.progress > 0
+            ? `Analyzing… ${Math.min(99, Math.floor(audio.loudness.progress * 100))}%` : 'Analyzing…',
         silent: 'Silent / cannot normalize',
         error: 'Normalization failed',
       }[audio.loudness.status] ?? '—';

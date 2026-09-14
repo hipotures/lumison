@@ -58,6 +58,7 @@ test('offline analyzer configures SpessaSynth before rendering without browser g
   }
 
   const progress = [];
+  const phases = [];
   const result = await analyzeMidiSoundFont({
     midiBuffer,
     midiName: 'original.mid',
@@ -86,6 +87,10 @@ test('offline analyzer configures SpessaSynth before rendering without browser g
       return { measuredLufs: null, measuredTruePeakDbTP: -Infinity };
     },
     onProgress: (value) => progress.push(value),
+    onPhase: (phase) => {
+      phases.push(phase);
+      if (phase === 'metering') assert.equal(calls.at(-1)[0], 'destroy');
+    },
   });
 
   assert.deepEqual(calls, [
@@ -94,13 +99,14 @@ test('offline analyzer configures SpessaSynth before rendering without browser g
     ['connect'],
     ['startOfflineRender'],
     ['startRendering'],
-    ['measureLoudness'],
     ['destroy'],
+    ['measureLoudness'],
     ['close'],
   ]);
   assert.equal(result.measuredLufs, null);
   assert.equal(result.measuredTruePeakDbTP, -Infinity);
   assert.deepEqual(progress, [0, 0.99, 1]);
+  assert.deepEqual(phases, ['rendering', 'metering']);
 });
 
 test('worker meter transfers rendered channels and terminates after returning a result', async () => {

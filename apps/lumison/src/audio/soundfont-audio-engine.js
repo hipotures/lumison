@@ -152,8 +152,10 @@ export class SoundFontAudioEngine {
 
   setLoudnessMode(mode) {
     this.loudness.setMode(mode);
-    if (mode === LOUDNESS_MODE.ORIGINAL || this.isTransportPlaying()) {
+    if (mode === LOUDNESS_MODE.ORIGINAL) {
       this.cancelNormalizationAnalysis();
+    } else if (this.isTransportPlaying()) {
+      this.cancelNormalizationAnalysis({ forPlayback: true });
     }
     this.applyNormalizationGain();
     this.notify();
@@ -181,7 +183,7 @@ export class SoundFontAudioEngine {
     const token = this.loudness.beginAnalysis();
     if (!token) return false;
     const controller = new AbortController();
-    this.analysisController = { token, controller };
+    this.analysisController = { token, controller, phase: 'rendering' };
     this.notify();
     const promise = this.runNormalizationAnalysis(token, controller.signal);
     this.analysisPromise = promise;
@@ -198,8 +200,13 @@ export class SoundFontAudioEngine {
     return this.transportPlaying || this.getTransport().playing === true;
   }
 
-  cancelNormalizationAnalysis() {
+  get analysisPhase() { return this.analysisController?.phase ?? null; }
+
+  cancelNormalizationAnalysis({ forPlayback = false } = {}) {
     if (!this.analysisController) return false;
+    // Preserve completed rendering and let its worker measurement reach cache.
+    // Offline synthesis still cancels on Play to avoid competing audio worklets.
+    if (forPlayback && this.analysisPhase === 'metering') return false;
     const { token, controller } = this.analysisController;
     controller.abort();
     const current = this.loudness.cancelAnalysis(token);
@@ -220,6 +227,11 @@ export class SoundFontAudioEngine {
         soundFontBuffer,
         processorUrl: this.processorUrl,
         signal,
+        onPhase: (phase) => {
+          if (this.analysisController?.token !== token || signal.aborted) return;
+          this.analysisController.phase = phase;
+          this.notify();
+        },
         onProgress: (progress) => {
           if (this.loudness.updateProgress(token, progress)) this.notify();
         },
@@ -432,7 +444,7 @@ export class SoundFontAudioEngine {
   handleTransport(reason) {
     if (reason === 'play') {
       this.transportPlaying = true;
-      this.cancelNormalizationAnalysis();
+      this.cancelNormalizationAnalysis({ forPlayback: true });
       void this.startPlayback();
     }
     else if (reason === 'pause' || reason === 'ended') {
