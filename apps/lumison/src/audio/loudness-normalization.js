@@ -185,6 +185,15 @@ export class LoudnessNormalizationState {
     return token.generation === this.generation && token.key === this.key;
   }
 
+  cancelAnalysis(token) {
+    if (token !== this.activeAnalysis) return false;
+    this.activeAnalysis = null;
+    this.progress = 0;
+    const current = token.generation === this.generation && token.key === this.key;
+    this.refresh();
+    return current;
+  }
+
   completeAnalysis(token, result) {
     if (token !== this.activeAnalysis) return false;
     this.activeAnalysis = null;

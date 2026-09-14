@@ -8,7 +8,7 @@ import {
   MIDI_AUDIO_SCHEDULER_CONFIG,
   MidiAudioScheduler,
 } from './midi-audio-scheduler.js';
-import { analyzeMidiSoundFont } from './loudness-analyzer.js';
+import { analyzeMidiSoundFont, isAbortError } from './loudness-analyzer.js';
 import {
   calculateNormalizationGain,
   effectiveOutputGain,
@@ -74,6 +74,8 @@ export class SoundFontAudioEngine {
     this.interval = null;
     this.operation = 0;
     this.analysisPromise = null;
+    this.analysisController = null;
+    this.transportPlaying = false;
     this.destroyed = false;
     this.pendingHorizon = 0;
     this.listeners = new Set();
@@ -150,6 +152,9 @@ export class SoundFontAudioEngine {
 
   setLoudnessMode(mode) {
     this.loudness.setMode(mode);
+    if (mode === LOUDNESS_MODE.ORIGINAL || this.isTransportPlaying()) {
+      this.cancelNormalizationAnalysis();
+    }
     this.applyNormalizationGain();
     this.notify();
     void this.maybeStartNormalizationAnalysis();
@@ -157,6 +162,7 @@ export class SoundFontAudioEngine {
   }
 
   setMidiSource(source) {
+    this.cancelNormalizationAnalysis();
     this.loudness.setSources({ midiSource: source });
     this.applyNormalizationGain();
     this.notify();
@@ -166,7 +172,7 @@ export class SoundFontAudioEngine {
   async maybeStartNormalizationAnalysis() {
     if (this.destroyed || this.loudness.mode !== LOUDNESS_MODE.NORMALIZE
       || this.loudness.result || !this.loudness.key || this.analysisPromise) return false;
-    if (this.getTransport().playing) {
+    if (this.isTransportPlaying()) {
       this.loudness.refresh();
       this.notify();
       return false;
@@ -174,28 +180,46 @@ export class SoundFontAudioEngine {
 
     const token = this.loudness.beginAnalysis();
     if (!token) return false;
+    const controller = new AbortController();
+    this.analysisController = { token, controller };
     this.notify();
-    const promise = this.runNormalizationAnalysis(token);
+    const promise = this.runNormalizationAnalysis(token, controller.signal);
     this.analysisPromise = promise;
     void promise.finally(() => {
       if (this.analysisPromise !== promise) return;
       this.analysisPromise = null;
+      if (this.analysisController?.token === token) this.analysisController = null;
       void this.maybeStartNormalizationAnalysis();
     });
     return true;
   }
 
-  async runNormalizationAnalysis(token) {
+  isTransportPlaying() {
+    return this.transportPlaying || this.getTransport().playing === true;
+  }
+
+  cancelNormalizationAnalysis() {
+    if (!this.analysisController) return false;
+    const { token, controller } = this.analysisController;
+    controller.abort();
+    const current = this.loudness.cancelAnalysis(token);
+    this.notify();
+    return current;
+  }
+
+  async runNormalizationAnalysis(token, signal) {
     try {
       const [midiBuffer, soundFontBuffer] = await Promise.all([
-        token.midiSource.loadBuffer(),
-        token.soundFontSource.loadBuffer(),
+        token.midiSource.loadBuffer({ signal }),
+        token.soundFontSource.loadBuffer({ signal }),
       ]);
+      if (signal.aborted) return;
       const measurement = await this.loudnessAnalyzer({
         midiBuffer,
         midiName: token.midiSource.name,
         soundFontBuffer,
         processorUrl: this.processorUrl,
+        signal,
         onProgress: (progress) => {
           if (this.loudness.updateProgress(token, progress)) this.notify();
         },
@@ -206,8 +230,12 @@ export class SoundFontAudioEngine {
       );
       if (this.loudness.completeAnalysis(token, result)) this.applyNormalizationGain();
     } catch (error) {
-      console.error('Loudness normalization analysis failed:', error);
-      if (this.loudness.failAnalysis(token, error)) this.applyNormalizationGain();
+      if (isAbortError(error)) {
+        this.loudness.cancelAnalysis(token);
+      } else {
+        console.error('Loudness normalization analysis failed:', error);
+        if (this.loudness.failAnalysis(token, error)) this.applyNormalizationGain();
+      }
     }
     this.notify();
   }
@@ -361,6 +389,7 @@ export class SoundFontAudioEngine {
 
   async loadSoundFont({ name, sourceKey, loadBuffer }) {
     if (this.loading) return false;
+    this.cancelNormalizationAnalysis();
     this.loading = true;
     this.setStatus('Loading...');
     this.interrupt();
@@ -401,11 +430,17 @@ export class SoundFontAudioEngine {
   }
 
   handleTransport(reason) {
-    if (reason === 'play') void this.startPlayback();
+    if (reason === 'play') {
+      this.transportPlaying = true;
+      this.cancelNormalizationAnalysis();
+      void this.startPlayback();
+    }
     else if (reason === 'pause' || reason === 'ended') {
+      this.transportPlaying = false;
       this.pause();
       void this.maybeStartNormalizationAnalysis();
     } else if (reason === 'stop' || reason === 'load') {
+      this.transportPlaying = false;
       this.stop();
       if (reason === 'stop') void this.maybeStartNormalizationAnalysis();
     } else if (reason === 'seek' || reason === 'rate' || reason === 'loop') {
@@ -419,6 +454,7 @@ export class SoundFontAudioEngine {
 
   destroy() {
     this.destroyed = true;
+    this.cancelNormalizationAnalysis();
     this.operation += 1;
     this.clearInterval();
     this.mute();

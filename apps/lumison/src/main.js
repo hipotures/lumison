@@ -82,7 +82,10 @@ function createMidiUI({ engine, baseline, canvas }) {
     const current = transport.position;
     const total = metadata?.duration ?? 0;
 
-    element('play').disabled = !loaded || transport.playing;
+    const missingRequiredSoundFont = audio.enabled && !audio.activeBankId;
+    element('play').disabled = !loaded || transport.playing || missingRequiredSoundFont;
+    element('play').title = missingRequiredSoundFont
+      ? 'Load a SoundFont or disable Audio for visual-only playback' : '';
     element('pause').disabled = !loaded || !transport.playing;
     element('stop').disabled = !loaded;
     element('timeline').disabled = !loaded;
@@ -235,8 +238,8 @@ function createMidiUI({ engine, baseline, canvas }) {
       name: option.textContent,
       file: option.dataset.file,
     };
-    const loadBuffer = async () => {
-      const response = await fetch(soundFontAssetUrl(entry), { cache: 'no-store' });
+    const loadBuffer = async ({ signal } = {}) => {
+      const response = await fetch(soundFontAssetUrl(entry), { cache: 'no-store', signal });
       if (!response.ok) throw new Error(`SoundFont request failed (${response.status})`);
       return response.arrayBuffer();
     };
@@ -301,6 +304,10 @@ function createMidiUI({ engine, baseline, canvas }) {
     event.target.value = '';
   });
   async function play() {
+    if (audio.enabled && !audio.activeBankId) {
+      audio.setStatus('No SoundFont', 'Load a SoundFont before audio playback');
+      return;
+    }
     if (audio.enabled && audio.activeBankId) await audio.activate();
     player.play();
   }

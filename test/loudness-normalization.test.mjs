@@ -13,6 +13,7 @@ import {
   LoudnessNormalizationState,
   selectedNormalizationGainDb,
 } from '../apps/lumison/src/audio/loudness-normalization.js';
+import { SoundFontAudioEngine } from '../apps/lumison/src/audio/soundfont-audio-engine.js';
 
 const closeTo = (actual, expected, tolerance = 1e-10) => {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} ~= ${expected}`);
@@ -157,4 +158,70 @@ test('analysis failure stays isolated and falls back to original gain', () => {
   assert.equal(state.error, 'offline render failed');
   assert.equal(state.result, null);
   assert.equal(selectedNormalizationGainDb(state.mode, state.result), 0);
+});
+
+test('cancelled analysis returns to pending without recording a failure', () => {
+  const state = new LoudnessNormalizationState();
+  state.setSources({ midiSource: source('midi'), soundFontSource: source('bank') });
+  state.setMode(LOUDNESS_MODE.NORMALIZE);
+  const token = state.beginAnalysis();
+
+  assert.equal(state.cancelAnalysis(token), true);
+  assert.equal(state.status, 'pending');
+  assert.equal(state.error, '');
+  assert.equal(state.activeAnalysis, null);
+  assert.equal(state.cache.size, 0);
+});
+
+test('normalization analysis remains pending while MIDI transport is playing', async () => {
+  const transport = { playing: true, position: 0, rate: 1 };
+  let analyses = 0;
+  const engine = new SoundFontAudioEngine({
+    getTransport: () => transport,
+    loudnessAnalyzer: async () => {
+      analyses += 1;
+      return { measuredLufs: -20, measuredTruePeakDbTP: -5 };
+    },
+  });
+  engine.loudness.setSources({
+    midiSource: source('midi'),
+    soundFontSource: source('bank'),
+  });
+
+  engine.setLoudnessMode(LOUDNESS_MODE.NORMALIZE);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(analyses, 0);
+  assert.equal(engine.loudness.status, 'pending');
+});
+
+test('starting MIDI playback cancels active normalization work without an error', async () => {
+  const transport = { playing: false, position: 0, rate: 1 };
+  let analysisSignal;
+  const engine = new SoundFontAudioEngine({
+    getTransport: () => transport,
+    loudnessAnalyzer: ({ signal }) => new Promise((resolve, reject) => {
+      analysisSignal = signal;
+      signal.addEventListener('abort', () => {
+        const error = new Error('cancelled');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    }),
+  });
+  engine.loudness.setSources({
+    midiSource: source('midi'),
+    soundFontSource: source('bank'),
+  });
+  engine.setLoudnessMode(LOUDNESS_MODE.NORMALIZE);
+  await new Promise((resolve) => setImmediate(resolve));
+  const activeAnalysis = engine.analysisPromise;
+  assert.equal(engine.loudness.status, 'analyzing');
+
+  transport.playing = true;
+  engine.handleTransport('play');
+  await activeAnalysis;
+  assert.equal(analysisSignal.aborted, true);
+  assert.equal(engine.loudness.status, 'pending');
+  assert.equal(engine.loudness.error, '');
+  assert.equal(engine.loudness.cache.size, 0);
 });

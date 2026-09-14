@@ -1,9 +1,72 @@
-import measureLufs from '@audio/loudness-lufs';
-import measureTruePeak from '@audio/loudness-truepeak';
 import { SPESSASYNTH_WORKLET_URL } from './spessasynth-config.js';
 
 export const LOUDNESS_ANALYSIS_SAMPLE_RATE = 44_100;
 export const LOUDNESS_ANALYSIS_TAIL_SECONDS = 3;
+export const LOUDNESS_METER_WORKER_URL = new URL('./loudness-meter-worker.js', import.meta.url);
+
+export function createAbortError() {
+  const error = new Error('Loudness analysis cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+export function isAbortError(error) {
+  return error?.name === 'AbortError';
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
+export function measureLoudnessInWorker({
+  channels,
+  sampleRate,
+  signal,
+  workerFactory = (url, options) => new Worker(url, options),
+  workerUrl = LOUDNESS_METER_WORKER_URL,
+  onProgress = () => {},
+}) {
+  throwIfAborted(signal);
+  const worker = workerFactory(workerUrl, { type: 'module' });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', abort);
+      worker.terminate();
+      callback(value);
+    };
+    const abort = () => finish(reject, createAbortError());
+    signal?.addEventListener('abort', abort, { once: true });
+    worker.onmessage = ({ data }) => {
+      if (data?.type === 'progress') {
+        onProgress(data.progress);
+      } else if (data?.type === 'result') {
+        finish(resolve, {
+          measuredLufs: data.measuredLufs,
+          measuredTruePeakDbTP: data.measuredTruePeakDbTP,
+        });
+      } else if (data?.type === 'error') {
+        finish(reject, new Error(data.message || 'Loudness measurement failed'));
+      }
+    };
+    worker.onerror = (event) => {
+      event.preventDefault?.();
+      finish(reject, new Error(event.message || 'Loudness measurement worker failed'));
+    };
+    worker.onmessageerror = () => {
+      finish(reject, new Error('Loudness measurement worker returned invalid data'));
+    };
+
+    try {
+      const transfer = channels.map((channel) => channel.buffer);
+      worker.postMessage({ channels, sampleRate }, transfer);
+    } catch (error) {
+      finish(reject, error);
+    }
+  });
+}
 
 const defaultContextFactory = ({ channels, length, sampleRate }) => new OfflineAudioContext(
   channels,
@@ -28,8 +91,11 @@ export async function analyzeMidiSoundFont({
   tailSeconds = LOUDNESS_ANALYSIS_TAIL_SECONDS,
   contextFactory = defaultContextFactory,
   spessaLoader = defaultSpessaLoader,
+  measureLoudness = measureLoudnessInWorker,
+  signal,
   onProgress = () => {},
 }) {
+  throwIfAborted(signal);
   if (!(midiBuffer instanceof ArrayBuffer)) throw new TypeError('MIDI source returned no data');
   if (!(soundFontBuffer instanceof ArrayBuffer)) {
     throw new TypeError('SoundFont source returned no data');
@@ -49,9 +115,15 @@ export async function analyzeMidiSoundFont({
   });
   let synth = null;
   let progressTimer = null;
+  const stopOfflineSynth = () => {
+    try { synth?.destroy(); } catch {}
+    synth = null;
+  };
 
   try {
+    signal?.addEventListener('abort', stopOfflineSynth, { once: true });
     await context.audioWorklet.addModule(processorUrl);
+    throwIfAborted(signal);
     synth = new WorkletSynthesizer(context);
     synth.connect(context.destination);
 
@@ -63,6 +135,7 @@ export async function analyzeMidiSoundFont({
       soundBankList: [{ bankOffset: 0, soundBankBuffer: soundFontBuffer }],
       sequencerOptions: { skipToFirstNoteOn: false, initialPlaybackRate: 1 },
     });
+    throwIfAborted(signal);
 
     onProgress(0);
     progressTimer = setInterval(() => {
@@ -71,19 +144,26 @@ export async function analyzeMidiSoundFont({
     const rendered = await context.startRendering();
     clearInterval(progressTimer);
     progressTimer = null;
+    throwIfAborted(signal);
     onProgress(0.99);
 
     const channels = Array.from(
       { length: rendered.numberOfChannels },
       (_, channel) => rendered.getChannelData(channel),
     );
-    const measuredLufs = measureLufs(channels, { fs: rendered.sampleRate });
-    const measuredTruePeakDbTP = measureTruePeak(channels, { fs: rendered.sampleRate });
+    const measurement = await measureLoudness({
+      channels,
+      sampleRate: rendered.sampleRate,
+      signal,
+      onProgress: (progress) => onProgress(0.99 + 0.01 * progress),
+    });
+    throwIfAborted(signal);
     onProgress(1);
-    return { measuredLufs, measuredTruePeakDbTP };
+    return measurement;
   } finally {
     if (progressTimer !== null) clearInterval(progressTimer);
-    try { synth?.destroy(); } catch {}
+    signal?.removeEventListener('abort', stopOfflineSynth);
+    stopOfflineSynth();
     try { await context.close?.(); } catch {}
   }
 }
