@@ -158,6 +158,14 @@ button:disabled, select:disabled, input:disabled { cursor: default; opacity: 0.4
 .audio-controls button { grid-column: 2 / 4; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .audio-controls input[type="range"] { width: 100%; accent-color: #8cdbc5; }
 .audio-controls output { color: #dce6e3; font-variant-numeric: tabular-nums; text-align: right; }
+.loudness-details {
+  grid-column: 1 / 4;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 5px 8px;
+}
+.loudness-details[hidden], .loudness-details [hidden] { display: none; }
+.loudness-details output { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #audioStatus { grid-column: 2 / 4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #audioStatus.error { color: #f0a6a6; }
 

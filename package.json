@@ -10,6 +10,8 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@audio/loudness-lufs": "1.1.0",
+    "@audio/loudness-truepeak": "1.1.4",
     "midifile-ts": "1.5.2",
     "spessasynth_lib": "4.3.14",
     "three": "0.185.1"

@@ -8,8 +8,17 @@ import {
   MIDI_AUDIO_SCHEDULER_CONFIG,
   MidiAudioScheduler,
 } from './midi-audio-scheduler.js';
+import { analyzeMidiSoundFont } from './loudness-analyzer.js';
+import {
+  calculateNormalizationGain,
+  effectiveOutputGain,
+  LOUDNESS_MODE,
+  LOUDNESS_NORMALIZATION,
+  LoudnessNormalizationState,
+} from './loudness-normalization.js';
+import { SPESSASYNTH_WORKLET_URL } from './spessasynth-config.js';
 
-export const SPESSASYNTH_WORKLET_URL = '/node_modules/spessasynth_lib/dist/spessasynth_processor.min.js';
+export { SPESSASYNTH_WORKLET_URL } from './spessasynth-config.js';
 const SOUND_BANK_LOAD_TIMEOUT_MS = 120_000;
 const DRAIN_MARGIN_SECONDS = 0.015;
 
@@ -38,6 +47,7 @@ export class SoundFontAudioEngine {
     getTransport = () => ({ position: 0, rate: 1, playing: false }),
     getPerformance = () => null,
     intervalMs = MIDI_AUDIO_SCHEDULER_CONFIG.intervalMs,
+    loudnessAnalyzer = analyzeMidiSoundFont,
   } = {}) {
     this.processorUrl = processorUrl;
     this.contextFactory = contextFactory;
@@ -45,6 +55,7 @@ export class SoundFontAudioEngine {
     this.getTransport = getTransport;
     this.getPerformance = getPerformance;
     this.intervalMs = intervalMs;
+    this.loudnessAnalyzer = loudnessAnalyzer;
     this.enabled = true;
     this.sourceActive = true;
     this.volume = 0.8;
@@ -62,8 +73,11 @@ export class SoundFontAudioEngine {
     this.initializing = null;
     this.interval = null;
     this.operation = 0;
+    this.analysisPromise = null;
+    this.destroyed = false;
     this.pendingHorizon = 0;
     this.listeners = new Set();
+    this.loudness = new LoudnessNormalizationState();
     this.scheduler = new MidiAudioScheduler({
       scheduleEvent: (event, time) => {
         if (this.synth) dispatchCanonicalMidiEvent(this.synth, event, time);
@@ -107,10 +121,95 @@ export class SoundFontAudioEngine {
     if (this.gain && this.scheduler.active && this.enabled && this.sourceActive) {
       const now = this.context.currentTime;
       this.gain.gain.cancelScheduledValues(now);
-      this.gain.gain.setValueAtTime(this.volume, now);
+      this.gain.gain.setValueAtTime(this.effectiveGain(), now);
     }
     this.notify();
     return this.volume;
+  }
+
+  effectiveGain() {
+    return effectiveOutputGain(this.volume, this.loudness.mode, this.loudness.result);
+  }
+
+  applyNormalizationGain() {
+    if (!this.gain || !this.context || !this.scheduler.active
+      || !this.enabled || !this.sourceActive) return;
+    const now = this.context.currentTime;
+    const parameter = this.gain.gain;
+    if (typeof parameter.cancelAndHoldAtTime === 'function') parameter.cancelAndHoldAtTime(now);
+    else {
+      const current = parameter.value;
+      parameter.cancelScheduledValues(now);
+      parameter.setValueAtTime(current, now);
+    }
+    parameter.linearRampToValueAtTime(
+      this.effectiveGain(),
+      now + LOUDNESS_NORMALIZATION.gainRampSeconds,
+    );
+  }
+
+  setLoudnessMode(mode) {
+    this.loudness.setMode(mode);
+    this.applyNormalizationGain();
+    this.notify();
+    void this.maybeStartNormalizationAnalysis();
+    return this.loudness.mode;
+  }
+
+  setMidiSource(source) {
+    this.loudness.setSources({ midiSource: source });
+    this.applyNormalizationGain();
+    this.notify();
+    void this.maybeStartNormalizationAnalysis();
+  }
+
+  async maybeStartNormalizationAnalysis() {
+    if (this.destroyed || this.loudness.mode !== LOUDNESS_MODE.NORMALIZE
+      || this.loudness.result || !this.loudness.key || this.analysisPromise) return false;
+    if (this.getTransport().playing) {
+      this.loudness.refresh();
+      this.notify();
+      return false;
+    }
+
+    const token = this.loudness.beginAnalysis();
+    if (!token) return false;
+    this.notify();
+    const promise = this.runNormalizationAnalysis(token);
+    this.analysisPromise = promise;
+    void promise.finally(() => {
+      if (this.analysisPromise !== promise) return;
+      this.analysisPromise = null;
+      void this.maybeStartNormalizationAnalysis();
+    });
+    return true;
+  }
+
+  async runNormalizationAnalysis(token) {
+    try {
+      const [midiBuffer, soundFontBuffer] = await Promise.all([
+        token.midiSource.loadBuffer(),
+        token.soundFontSource.loadBuffer(),
+      ]);
+      const measurement = await this.loudnessAnalyzer({
+        midiBuffer,
+        midiName: token.midiSource.name,
+        soundFontBuffer,
+        processorUrl: this.processorUrl,
+        onProgress: (progress) => {
+          if (this.loudness.updateProgress(token, progress)) this.notify();
+        },
+      });
+      const result = calculateNormalizationGain(
+        measurement.measuredLufs,
+        measurement.measuredTruePeakDbTP,
+      );
+      if (this.loudness.completeAnalysis(token, result)) this.applyNormalizationGain();
+    } catch (error) {
+      console.error('Loudness normalization analysis failed:', error);
+      if (this.loudness.failAnalysis(token, error)) this.applyNormalizationGain();
+    }
+    this.notify();
   }
 
   async ensureInitialized({ resume = false } = {}) {
@@ -165,7 +264,7 @@ export class SoundFontAudioEngine {
     if (!this.gain || !this.context) return;
     const now = this.context.currentTime;
     this.gain.gain.cancelScheduledValues(now);
-    this.gain.gain.setValueAtTime(this.volume, now);
+    this.gain.gain.setValueAtTime(this.effectiveGain(), now);
   }
 
   clearInterval() {
@@ -260,7 +359,7 @@ export class SoundFontAudioEngine {
     this.notify();
   }
 
-  async loadSoundFont({ name, loadBuffer }) {
+  async loadSoundFont({ name, sourceKey, loadBuffer }) {
     if (this.loading) return false;
     this.loading = true;
     this.setStatus('Loading...');
@@ -286,9 +385,13 @@ export class SoundFontAudioEngine {
       }
       this.activeBankId = newBankId;
       this.activeBankName = name;
+      this.loudness.setSources({
+        soundFontSource: sourceKey ? { key: sourceKey, name, loadBuffer } : null,
+      });
       this.loading = false;
       await this.synchronize({ restartSounding: true });
       this.refreshStatus();
+      void this.maybeStartNormalizationAnalysis();
       return true;
     } catch (error) {
       this.loading = false;
@@ -299,9 +402,13 @@ export class SoundFontAudioEngine {
 
   handleTransport(reason) {
     if (reason === 'play') void this.startPlayback();
-    else if (reason === 'pause' || reason === 'ended') this.pause();
-    else if (reason === 'stop' || reason === 'load') this.stop();
-    else if (reason === 'seek' || reason === 'rate' || reason === 'loop') {
+    else if (reason === 'pause' || reason === 'ended') {
+      this.pause();
+      void this.maybeStartNormalizationAnalysis();
+    } else if (reason === 'stop' || reason === 'load') {
+      this.stop();
+      if (reason === 'stop') void this.maybeStartNormalizationAnalysis();
+    } else if (reason === 'seek' || reason === 'rate' || reason === 'loop') {
       if (this.getTransport().playing && this.enabled && this.sourceActive) {
         void this.startPlayback();
       } else {
@@ -311,6 +418,7 @@ export class SoundFontAudioEngine {
   }
 
   destroy() {
+    this.destroyed = true;
     this.operation += 1;
     this.clearInterval();
     this.mute();

@@ -2,6 +2,11 @@ import { createState, TflEngine } from '../../../packages/tfl-engine/src/index.j
 import { createBrowserRenderHost } from '../../../packages/tfl-engine/src/browser.js';
 import { SoundFontAudioEngine } from './audio/soundfont-audio-engine.js';
 import {
+  createHostedSourceKey,
+  createLocalFileSourceKey,
+  LOUDNESS_MODE,
+} from './audio/loudness-normalization.js';
+import {
   isSupportedSoundFontName,
   loadSoundFontCatalog,
   soundFontAssetUrl,
@@ -38,6 +43,10 @@ function noteName(note) {
 
 function pedalText(pedal) {
   return pedal.rawValue > 0 ? `${pedal.rawValue} / ${pedal.on ? 'on' : 'off'}` : 'off';
+}
+
+function formatSignedDecibels(value) {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`;
 }
 
 function createMidiUI({ engine, baseline, canvas }) {
@@ -116,6 +125,41 @@ function createMidiUI({ engine, baseline, canvas }) {
     element('audioVolume').disabled = mode === 'live';
     element('audioVolume').value = String(audio.volume);
     element('audioVolumeValue').textContent = audio.volume.toFixed(2);
+    element('loudnessMode').disabled = mode === 'live';
+    element('loudnessMode').value = audio.loudness.mode;
+    const normalized = audio.loudness.mode === LOUDNESS_MODE.NORMALIZE;
+    const normalizationReady = audio.loudness.status === 'ready';
+    element('loudnessDetails').hidden = !normalized;
+    for (const detail of document.querySelectorAll('[data-loudness-ready]')) {
+      detail.hidden = !normalizationReady;
+    }
+    element('loudnessStateLabel').hidden = normalizationReady;
+    element('loudnessState').hidden = normalizationReady;
+    if (normalized) {
+      const statusText = {
+        unavailable: 'Load MIDI + SoundFont',
+        pending: 'Normalization pending',
+        analyzing: audio.loudness.progress > 0
+          ? `Analyzing… ${Math.round(audio.loudness.progress * 100)}%` : 'Analyzing…',
+        silent: 'Silent / cannot normalize',
+        error: 'Normalization failed',
+      }[audio.loudness.status] ?? '—';
+      element('loudnessState').textContent = statusText;
+      element('loudnessState').title = audio.loudness.error;
+      if (normalizationReady) {
+        const result = audio.loudness.result;
+        element('measuredLufs').textContent = `${result.measuredLufs.toFixed(1)} LUFS`;
+        element('measuredTruePeak').textContent = `${result.measuredTruePeakDbTP.toFixed(1)} dBTP`;
+        element('normalizationGain').textContent = formatSignedDecibels(
+          result.normalizationGainDb,
+        );
+        element('normalizationResult').textContent = {
+          target: '-16 LUFS target',
+          'peak-limited': 'peak-limited',
+          'gain-limited': 'gain-bounded',
+        }[result.result];
+      }
+    }
     element('audioStatus').textContent = audio.status;
     element('audioStatus').title = audio.error;
     element('audioStatus').classList.toggle('error', audio.status === 'Error');
@@ -191,13 +235,15 @@ function createMidiUI({ engine, baseline, canvas }) {
       name: option.textContent,
       file: option.dataset.file,
     };
+    const loadBuffer = async () => {
+      const response = await fetch(soundFontAssetUrl(entry), { cache: 'no-store' });
+      if (!response.ok) throw new Error(`SoundFont request failed (${response.status})`);
+      return response.arrayBuffer();
+    };
     const loaded = await audio.loadSoundFont({
       name: entry.name,
-      loadBuffer: async () => {
-        const response = await fetch(soundFontAssetUrl(entry), { cache: 'no-store' });
-        if (!response.ok) throw new Error(`SoundFont request failed (${response.status})`);
-        return response.arrayBuffer();
-      },
+      sourceKey: createHostedSourceKey('soundfont', entry.id, entry.file),
+      loadBuffer,
     });
     if (!loaded) element('soundfontSelect').value = '';
     dirty = true;
@@ -211,6 +257,7 @@ function createMidiUI({ engine, baseline, canvas }) {
     }
     const loaded = await audio.loadSoundFont({
       name: file.name,
+      sourceKey: createLocalFileSourceKey('soundfont', file),
       loadBuffer: () => file.arrayBuffer(),
     });
     if (loaded) {
@@ -233,6 +280,11 @@ function createMidiUI({ engine, baseline, canvas }) {
     element('fileName').textContent = `Loading ${file.name}…`;
     try {
       player.load(await file.arrayBuffer(), file.name);
+      audio.setMidiSource({
+        key: createLocalFileSourceKey('midi', file),
+        name: file.name,
+        loadBuffer: () => file.arrayBuffer(),
+      });
       element('fileName').textContent = file.name;
       element('fileName').title = file.name;
       render();
@@ -264,6 +316,9 @@ function createMidiUI({ engine, baseline, canvas }) {
   element('audioVolume').addEventListener('input', (event) => {
     const volume = audio.setVolume(event.target.value);
     element('audioVolumeValue').textContent = volume.toFixed(2);
+  });
+  element('loudnessMode').addEventListener('change', (event) => {
+    audio.setLoudnessMode(event.target.value);
   });
   element('soundfontSelect').addEventListener('change', (event) => {
     const option = event.target.selectedOptions[0];
