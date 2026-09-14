@@ -118,11 +118,16 @@ export function convertParsedMidi(parsed, filename = 'Untitled.mid') {
   const tempoMap = createTempoMap(tracks, ticksPerBeat);
   const events = [];
   const channels = new Set();
+  const keySignatures = [];
 
   for (const track of tracks) {
     for (const item of track.positioned) {
       const timestamp = ticksToSeconds(item.ticks, tempoMap, ticksPerBeat);
       const context = { track: item.trackIndex + 1, trackName: track.name };
+      // Diagnostic metadata only: never add key signatures to playback events.
+      if (item.event.type === 'meta' && item.event.subtype === 'keySignature') {
+        keySignatures.push({ timestamp, fifths: item.event.key, minor: item.event.scale });
+      }
       let canonical = null;
       if (item.event.type === 'channel') {
         canonical = canonicalChannelEvent(item.event, timestamp, context);
@@ -165,6 +170,7 @@ export function convertParsedMidi(parsed, filename = 'Untitled.mid') {
       durationTicks,
       ticksPerBeat,
       tempoMap: tempoMap.map(({ synthetic, ...tempo }) => tempo),
+      keySignatures: keySignatures.sort((a, b) => a.timestamp - b.timestamp),
     },
   };
 }

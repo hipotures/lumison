@@ -9,7 +9,7 @@ boolean switches, slider bounds/steps, and diagnostic feature bindings. The UI,
 validator, serializer, and runtime use this model. Original numeric defaults and
 interaction switches come from the unchanged `MUSICAL_FIELD_V1` profile.
 
-The complete JSON envelope has `schema: "lumison-midi-visual-tuning"`, `version: 1`,
+The complete JSON envelope has `schema: "lumison-midi-visual-tuning"`, `version: 2`,
 `profile: "musical-field-v1"`, and these objects:
 
 - `master`: enabled and sensitivity.
@@ -21,12 +21,16 @@ The complete JSON envelope has `schema: "lumison-midi-visual-tuning"`, `version:
 - `interactions`: the five mechanisms and their currently configured parameters.
 - `temporal`: parameter update interval, the existing smooth/immediate global
   parameter transition mode, and optional continuous-input smoothing.
+- `harmony`: local analysis settings and independent, initially disabled tonal
+  offsets. See [Harmony / Tonality](harmony-tonality.md).
 
 Export and Copy use the same deterministic, pretty-printed JSON. Import requires
 the complete model, rejects unknown properties and incompatible versions/types,
 clamps finite numbers to declared ranges, and rejects an inverted pitch range.
 Validation finishes before any runtime mutation. No playback state is serialized.
 Restore defaults reinstates the original profile; smoothing defaults off.
+Version 1 imports migrate explicitly by adding default, neutral harmony settings;
+their existing settings are preserved. Version 2 requires the complete harmony object.
 
 Disable all switches off every relationship and interaction while preserving
 numeric settings and playback. Solo preserves settings, disables other mappings,

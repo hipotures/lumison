@@ -1,4 +1,6 @@
 import { MUSICAL_FIELD_V1 } from './mapping-profiles.js';
+import { TONAL_TARGETS } from './tonal-mapping.js';
+import { PARAM_SCHEMA } from '../../../../packages/tfl-engine/src/index.js';
 import { MOTION_WARP_LIMITS, RIPPLE_DISPLACEMENT_LIMITS, MEMBRANE_RESPONSE_LIMITS } from '../../../../packages/tfl-engine/src/index.js';
 
 // Semantic paths are shared by serialization, runtime and generated controls.
@@ -9,6 +11,7 @@ const toggle = (path, label, feature) => add(path, label, true, undefined, undef
 export const GROUPS = {
   master: 'Master', transient: 'Attack / transient mapping', influence: 'Spatial musical field',
   parameterMappings: 'Continuous global parameter mappings', interactions: 'Visual mechanisms', temporal: 'Temporal response',
+  harmony: 'Harmony / Tonality',
 };
 add('master.enabled', 'Mapping enabled', true);
 add('master.sensitivity', 'Master sensitivity', 1, 0, 2);
@@ -53,6 +56,25 @@ add('temporal.parameterInterval', 'Parameter update interval (seconds)', MUSICAL
 add('temporal.parameterSmoothing', 'Smooth global parameter transitions', true);
 add('temporal.enabled', 'Mapping smoothing enabled', false);
 add('temporal.responseSeconds', 'Mapping smoothing time (seconds)', 0, 0, 2);
+add('harmony.analysis.enabled', 'Tonality analysis', true);
+add('harmony.analysis.windowSeconds', 'Analysis window (seconds)', 12, 4, 60, 0.5);
+add('harmony.analysis.minimumConfidence', 'Minimum confidence', 0.65, 0, 1);
+add('harmony.analysis.minimumStableSeconds', 'Minimum stable time (seconds)', 3, 0.5, 12, 0.25);
+add('harmony.analysis.switchMargin', 'Key change correlation margin', 0.08, 0, 0.3);
+add('harmony.analysis.metadataPreference', 'Metadata correlation preference', 0.08, 0, 0.2);
+add('harmony.analysis.holdLastKey', 'Hold key when confidence is low', true);
+add('harmony.mapping.enabled', 'Tonality → Visual regime', false);
+add('harmony.mapping.influence', 'Tonal influence', 0, 0, 1);
+add('harmony.mapping.transitionSeconds', 'Tonal transition time (seconds)', 5, 0.25, 30, 0.25);
+add('harmony.mapping.seekTransitionSeconds', 'Seek transition (seconds; 0 = immediate)', 0, 0, 2, 0.05);
+for (const [name, source] of Object.entries(TONAL_TARGETS)) {
+  const parameter = PARAM_SCHEMA[name];
+  const label = `${source} → ${parameter.label}`;
+  const limit = (parameter.maximum - parameter.minimum) / 2;
+  add(`harmony.mapping.targets.${name}.enabled`, label, false);
+  add(`harmony.mapping.targets.${name}.amount`, `${label} amount`, 0, -limit, limit, parameter.step);
+  if (source === 'Tonic') add(`harmony.mapping.targets.${name}.phaseDegrees`, `${parameter.label}: fifths phase (degrees)`, 0, -180, 180, 1);
+}
 
 export const getTuningValue = (config, path) => path.split('.').reduce((value, key) => value?.[key], config);
 export function setTuningValue(config, path, value) {
@@ -62,13 +84,17 @@ export function setTuningValue(config, path, value) {
   parent[last] = value;
 }
 export function defaultTuning() {
-  const config = { schema: 'lumison-midi-visual-tuning', version: 1, profile: MUSICAL_FIELD_V1.id };
+  const config = { schema: 'lumison-midi-visual-tuning', version: 2, profile: MUSICAL_FIELD_V1.id };
   for (const item of TUNING_SCHEMA) setTuningValue(config, item.path, item.default);
   return config;
 }
 export function validateTuning(input) {
-  if (!input || input.schema !== 'lumison-midi-visual-tuning' || input.version !== 1 || input.profile !== MUSICAL_FIELD_V1.id) {
-    throw new Error('Incompatible tuning schema, version or profile. Expected lumison-midi-visual-tuning version 1 / musical-field-v1.');
+  if (input?.version === 1 && !Object.hasOwn(input, 'harmony')) {
+    // Explicit backwards migration: preserve every v1 setting, add neutral harmony.
+    input = { ...input, version: 2, harmony: defaultTuning().harmony };
+  }
+  if (!input || input.schema !== 'lumison-midi-visual-tuning' || input.version !== 2 || input.profile !== MUSICAL_FIELD_V1.id) {
+    throw new Error('Incompatible tuning schema, version or profile. Expected lumison-midi-visual-tuning version 2 / musical-field-v1 (version 1 imports supported).');
   }
   const result = defaultTuning();
   for (const item of TUNING_SCHEMA) {
@@ -92,7 +118,7 @@ export const parseTuning = (json) => validateTuning(JSON.parse(json));
 export const serializeTuning = (config) => `${JSON.stringify(validateTuning(config), null, 2)}\n`;
 export function disableAllTuning(config) {
   const next = validateTuning(config);
-  for (const item of TUNING_SCHEMA) if (typeof item.default === 'boolean' && !item.path.startsWith('master.') && !item.path.startsWith('temporal.')) setTuningValue(next, item.path, false);
+  for (const item of TUNING_SCHEMA) if (typeof item.default === 'boolean' && !item.path.startsWith('master.') && !item.path.startsWith('temporal.') && !item.path.startsWith('harmony.analysis.')) setTuningValue(next, item.path, false);
   return next;
 }
 export function soloTuning(config, path) {
@@ -100,6 +126,13 @@ export function soloTuning(config, path) {
   if (!TUNING_SCHEMA.some((item) => item.path === path && typeof item.default === 'boolean')) throw new Error('Unknown mapping');
   next.master.enabled = true;
   setTuningValue(next, path, true);
+  if (path.startsWith('harmony.mapping.')) {
+    next.harmony.analysis.enabled = true;
+    next.harmony.mapping.enabled = true;
+    if (path === 'harmony.mapping.enabled') {
+      for (const name of Object.keys(TONAL_TARGETS)) next.harmony.mapping.targets[name].enabled = config.harmony.mapping.targets[name].enabled;
+    }
+  }
   // Global parameters need no interaction mechanism. Spatial/ripple solos need
   // a carrier; their other musical contributions stay disabled.
   if (path.startsWith('transient.')) {

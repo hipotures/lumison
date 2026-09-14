@@ -234,6 +234,7 @@ test('default engine-call trace matches pre-tuning HEAD a687795 exactly', () => 
       position: i / 60, energy01: (i % 17) / 17, density01: (i % 13) / 13,
       soundingPolyphony: i % 5, register01: i % 11 ? (i % 19) / 19 : null,
       span01: (i % 7) / 7, pitchMotion01: (i % 3) / 3, sustain01: i % 2,
+      harmony: { key: { tonicPitchClass: i % 12, mode: i % 2 ? 'major' : 'minor' }, confidence: 0.9 },
     };
     visual.update(f);
     visual.emitEvent({ type: 'note-on', note: 21 + i % 88, velocity: (i % 127) / 127 }, f);
@@ -258,7 +259,7 @@ test('import rejects malformed types, unknown fields and versions atomically; cl
   const before = serializeTuning(visual.tuning);
   const calls = engine.parameterCalls.length;
   for (const mutate of [
-    (c) => { c.version = 2; }, (c) => { c.transient.width = '0.2'; },
+    (c) => { c.version = 99; }, (c) => { c.transient.width = '0.2'; },
     (c) => { c.influence.enabled = 1; }, (c) => { delete c.temporal; },
     (c) => { c.master.extra = true; }, (c) => { c.transient.width = NaN; },
   ]) {

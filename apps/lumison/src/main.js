@@ -22,6 +22,8 @@ import {
 import { MAPPED_PARAMETER_NAMES } from './visual/mapping-profiles.js';
 import { MusicalVisualMapper } from './visual/musical-visual-mapper.js';
 import { createVisualTuningUI } from './visual/visual-tuning-ui.js';
+import { TonalityAnalyzer, TonalityTimeline } from './music/tonality.js';
+import { TONAL_TARGETS } from './visual/tonal-mapping.js';
 
 const element = (id) => document.getElementById(id);
 const bootMessage = (message) => { element('bootMsg').textContent = message; };
@@ -59,13 +61,25 @@ function createMidiUI({ engine, baseline, canvas }) {
   });
   let features = createMusicalFeatureState();
   const mapper = new MusicalVisualMapper({ engine, baseline });
+  const tonality = new TonalityAnalyzer(mapper.tuning.harmony.analysis);
+  let tonalEvents = null;
+  function updateHarmony({ rebuild = false, configuration = mapper.tuning } = {}) {
+    if (player.metadata && tonalEvents !== player.canonicalEvents) {
+      tonalEvents = player.canonicalEvents;
+      tonality.setTimeline(new TonalityTimeline(tonalEvents, player.metadata.keySignatures, player.metadata.duration));
+      rebuild = true;
+    }
+    tonality.configure(configuration.harmony.analysis, features.position);
+    features.harmony = rebuild ? tonality.seek(features.position) : tonality.update(features.position);
+    return features;
+  }
   let mode = 'file';
   let scrubbing = false;
   let dirty = true;
   let mappingDirty = true;
   const tuningUI = createVisualTuningUI({
     root: element('visualMappingTuning'), mapper,
-    getFeatures: () => features, isActive: () => mode === 'file',
+    getFeatures: (configuration) => updateHarmony({ configuration }), isActive: () => mode === 'file',
   });
 
   const canvasAspect = () => {
@@ -200,6 +214,7 @@ function createMidiUI({ engine, baseline, canvas }) {
         currentPlayer.performance,
         currentPlayer.transport.position,
       );
+      updateHarmony({ rebuild: true });
       if (mode === 'file') mapper.seek(features);
       mappingDirty = false;
     } else if (reason === 'stop' || reason === 'load') {
@@ -208,12 +223,14 @@ function createMidiUI({ engine, baseline, canvas }) {
         tempoBpm: currentPlayer.performance.currentTempo,
       });
       mapper.stop();
+      updateHarmony({ rebuild: true });
       mappingDirty = false;
     } else if (reason === 'loop') {
       features = createMusicalFeatureState({
         position: currentPlayer.transport.position,
         tempoBpm: currentPlayer.performance.currentTempo,
       });
+      updateHarmony({ rebuild: true });
       if (mode === 'file') mapper.loop(features);
       mappingDirty = false;
     }
@@ -414,6 +431,7 @@ function createMidiUI({ engine, baseline, canvas }) {
       const position = player.transport.position;
       if (position !== features.position) {
         updateMusicalFeatureState(features, player.performance, position);
+        updateHarmony();
         mappingDirty = true;
       }
       mapper.setAspect(canvasAspect());
@@ -447,7 +465,7 @@ async function boot() {
     },
   });
   const preset = engine.applyPreset('Soap Film', { transition: 'immediate' });
-  const baseline = Object.fromEntries(MAPPED_PARAMETER_NAMES.map((name) => [
+  const baseline = Object.fromEntries([...new Set([...MAPPED_PARAMETER_NAMES, ...Object.keys(TONAL_TARGETS)])].map((name) => [
     name,
     preset.accepted.find((entry) => entry.name === name)?.value,
   ]));

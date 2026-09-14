@@ -2,9 +2,11 @@ import {
   clampParam,
   createRippleDisplacementEvent,
   normalizedViewportToSurface,
+  parameterDefault,
 } from '../../../../packages/tfl-engine/src/index.js';
 import { MUSICAL_FIELD_V1 } from './mapping-profiles.js';
 import { defaultTuning, validateTuning } from './visual-tuning.js';
+import { TONAL_TARGETS, TonalTransition } from './tonal-mapping.js';
 
 const clamp01 = (value) => Math.min(1, Math.max(0, Number(value) || 0));
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
@@ -52,6 +54,12 @@ export class MusicalVisualMapper {
     this.engine = engine;
     this.tuning = defaultTuning();
     this.profile = profile;
+    this.tonalTransition = new TonalTransition();
+    this.tonalValues = {};
+    this.tonalTargetsUsed = new Set();
+    this.tonalBaseline = Object.fromEntries(Object.keys(TONAL_TARGETS).map((name) => [name,
+      Number.isFinite(baseline[name]) ? baseline[name] : parameterDefault(name),
+    ]));
     this.baseline = Object.fromEntries(
       Object.keys(profile.parameterMappings).map((name) => [name, baseline[name]]),
     );
@@ -195,8 +203,16 @@ export class MusicalVisualMapper {
       const value = Object.hasOwn(mapping, 'centeredDelta')
         ? this.baseline[name] + (feature - 0.5) * 2 * mapping.centeredDelta * this.sensitivity
         : this.baseline[name] + feature * mapping.delta * this.sensitivity;
-      changes[name] = clampParam(name, value);
+      changes[name] = value;
     }
+    // Compose before clamping, so filmBase's register and tonic offsets cannot
+    // overwrite one another or depend on setter order. Extra targets are touched
+    // only after opting in, preserving the original default engine-call trace.
+    for (const name of this.tonalTargetsUsed) {
+      changes[name] = (changes[name] ?? this.tonalBaseline[name])
+        + (this.tonalValues[name] ?? 0) * this.sensitivity;
+    }
+    for (const name of Object.keys(changes)) changes[name] = clampParam(name, changes[name]);
     return changes;
   }
 
@@ -281,9 +297,12 @@ export class MusicalVisualMapper {
     });
   }
 
-  update(features, { forceParameters = false, resetVelocity = false } = {}) {
+  update(features, { forceParameters = false, resetVelocity = false, seekTonality = false } = {}) {
     this.lastFeatures = features;
     if (!this.enabled) return false;
+    this.tonalValues = this.tonalTransition.update(this.tuning.harmony, features?.harmony?.key,
+      Number(features?.position) || 0, { seek: seekTonality });
+    for (const name of Object.keys(this.tonalValues)) this.tonalTargetsUsed.add(name);
     const temporal = this.tuning.temporal;
     if (temporal.enabled && temporal.responseSeconds > 0) {
       const previous = this.smoothedFeatures;
@@ -310,9 +329,13 @@ export class MusicalVisualMapper {
   }
 
   restoreBaseline() {
+    this.tonalTransition.reset();
+    this.tonalValues = {};
     this.lastParameterPosition = -Infinity;
-    this.lastParameterValues = { ...this.baseline };
-    this.engine.setParameters({ ...this.baseline }, {
+    const baseline = { ...this.baseline };
+    for (const name of this.tonalTargetsUsed) baseline[name] = this.tonalBaseline[name];
+    this.lastParameterValues = baseline;
+    this.engine.setParameters(baseline, {
       source: 'musical-field-v1-reset',
       transition: this.tuning.temporal.parameterSmoothing ? 'smooth' : 'immediate',
       markPreset: false,
@@ -323,14 +346,14 @@ export class MusicalVisualMapper {
     if (!this.enabled) return;
     this.engine.clearTransientEvents();
     this.resetInfluenceMotion();
-    this.update(features, { forceParameters: true, resetVelocity: true });
+    this.update(features, { forceParameters: true, resetVelocity: true, seekTonality: true });
   }
 
   loop(features) {
     if (!this.enabled) return;
     this.engine.clearTransientEvents();
     this.resetInfluenceMotion();
-    this.update(features, { forceParameters: true, resetVelocity: true });
+    this.update(features, { forceParameters: true, resetVelocity: true, seekTonality: true });
   }
 
   stop() {
