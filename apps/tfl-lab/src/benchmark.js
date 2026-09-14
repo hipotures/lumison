@@ -43,7 +43,7 @@ export async function runBenchmark({
   const batches = [];
   checkCancelled();
   // Drain normal rendering before warm-up starts.
-  await synchronize();
+  await synchronize(signal);
   for (const [phase, duration] of [['warm-up', warmupMs], ['measuring', durationMs]]) {
     const start = now();
     let lastUpdate = -Infinity;
@@ -51,7 +51,9 @@ export async function runBenchmark({
       checkCancelled();
       const batchStart = now();
       renderBatch(BENCHMARK_BATCH_SIZE);
-      await synchronize();
+      // Wall time includes submission, asynchronous GPU completion polling,
+      // and its event-loop scheduling overhead. It is not pure GPU time.
+      await synchronize(signal);
       const completed = now();
       checkCancelled();
       if (phase === 'measuring') {

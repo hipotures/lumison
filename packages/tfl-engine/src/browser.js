@@ -12,6 +12,7 @@ import {
   normalizeRequestedBackend,
 } from './renderer.js';
 import { createFallback } from './fallback.js';
+import { waitForWebGLCompletion } from './benchmark-sync.js';
 
 export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
   if (!canvas || !fallbackCanvas) throw new Error('Browser render host requires GPU and fallback canvases');
@@ -164,7 +165,9 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
       if (backend === 'WebGPU' && typeof queue?.onSubmittedWorkDone !== 'function') {
         throw new Error('WebGPU completion synchronization unavailable');
       }
-      if (backend !== 'WebGPU' && (backend !== 'WebGL2' || typeof gl?.finish !== 'function')) {
+      if (backend !== 'WebGPU' && (backend !== 'WebGL2'
+        || !['fenceSync', 'flush', 'clientWaitSync', 'deleteSync', 'isContextLost']
+          .every((name) => typeof gl?.[name] === 'function'))) {
         throw new Error('GPU completion synchronization unavailable');
       }
       host.benchmarking = true;
@@ -179,11 +182,9 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
           // Reuse the last normal frame's uniforms and buffer unchanged.
           for (let index = 0; index < frames; index++) renderer.render(stage.scene, stage.camera);
         },
-        async synchronize() {
+        async synchronize(signal) {
           if (gl) {
-            if (gl.isContextLost()) throw new Error('WebGL2 context lost');
-            gl.finish();
-            if (gl.isContextLost()) throw new Error('WebGL2 context lost');
+            await waitForWebGLCompletion(gl, { signal });
           } else {
             let timer;
             try {
