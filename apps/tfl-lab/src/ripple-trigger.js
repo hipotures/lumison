@@ -1,10 +1,10 @@
 // TFL Lab policy for translating an active browser gesture into source-neutral
-// event origins. This module deliberately has no DOM or engine dependency so
-// click and distance-spaced drag behavior can be tested deterministically.
+// event origins. Qwen ripples and Mobile membrane waves use independent policy
+// instances. This module deliberately has no DOM or engine dependency.
 
 export const RIPPLE_DRAG_SPACING = 0.075;
 
-export function createRippleTriggerPolicy(configuration = {}) {
+export function createSpatialEventTriggerPolicy(configuration = {}) {
   const state = {
     configuration: {
       clickEnabled: configuration.clickEnabled !== false,
@@ -77,6 +77,9 @@ export function createRippleTriggerPolicy(configuration = {}) {
     },
   };
 }
+
+// Phase 3D compatibility exports for existing integrations and tests.
+export const createRippleTriggerPolicy = createSpatialEventTriggerPolicy;
 
 function finitePositive(value) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;

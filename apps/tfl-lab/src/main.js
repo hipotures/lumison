@@ -2,6 +2,7 @@
 // persistence and presentation stay here; rendering and visual state use the
 // TFL Engine facade.
 import {
+  createMembraneWaveEvent,
   createRippleDisplacementEvent,
   createState,
   DIAG_MODES,
@@ -9,7 +10,12 @@ import {
 } from '../../../packages/tfl-engine/src/index.js';
 import { createBrowserRenderHost } from '../../../packages/tfl-engine/src/browser.js';
 import { createPointerAdapter } from './input.js';
-import { createRippleTriggerPolicy } from './ripple-trigger.js';
+import { createSpatialEventTriggerPolicy } from './ripple-trigger.js';
+import {
+  applyInteractionProfile,
+  markInteractionProfileCustom,
+  MEMBRANE_WAVE_DRAG_SPACING,
+} from './interaction-profiles.js';
 import { buildUI } from './ui.js';
 import { copyText, downloadBlob, toast, toggleFullscreen } from './util.js';
 import {
@@ -87,6 +93,7 @@ async function boot() {
     probeTimer: 0,
     persistTimer: 0,
     rippleTriggers: null,
+    membraneTriggers: null,
   };
 
   const renderHost = createBrowserRenderHost({ canvas, fallbackCanvas });
@@ -112,10 +119,27 @@ async function boot() {
   if (!saved || !applyLabSnapshot(engine, labState, saved)) {
     engine.applyPreset('Soap Film', { transition: 'immediate' });
   }
-  app.rippleTriggers = createRippleTriggerPolicy({
+  app.rippleTriggers = createSpatialEventTriggerPolicy({
     clickEnabled: labState.rippleOnClick,
     dragEnabled: labState.rippleDuringDrag,
   });
+  app.membraneTriggers = createSpatialEventTriggerPolicy({
+    clickEnabled: labState.membraneWaveOnPress,
+    dragEnabled: labState.membraneWaveDuringDrag,
+    spacing: MEMBRANE_WAVE_DRAG_SPACING,
+  });
+
+  function configureEventTriggers() {
+    app.rippleTriggers.configure({
+      clickEnabled: labState.rippleOnClick,
+      dragEnabled: labState.rippleDuringDrag,
+    });
+    app.membraneTriggers.configure({
+      clickEnabled: labState.membraneWaveOnPress,
+      dragEnabled: labState.membraneWaveDuringDrag,
+      spacing: MEMBRANE_WAVE_DRAG_SPACING,
+    });
+  }
 
   const persistSoon = () => {
     clearTimeout(app.persistTimer);
@@ -198,6 +222,7 @@ async function boot() {
       `drag     <b>${diagnostic.activeDeformation.dragEnabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.activeDeformation.dragGain.toFixed(2)}</b>  vector <b>${diagnostic.activeDeformation.dragDisplacement.x.toFixed(4)}, ${diagnostic.activeDeformation.dragDisplacement.y.toFixed(4)} su</b>${diagnostic.capabilities?.activeDeformation === false ? '  (GPU unavailable)' : ''}`,
       `shear    <b>${diagnostic.coordinateShear.enabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.coordinateShear.gain.toFixed(2)}</b>  speed <b>${diagnostic.coordinateShear.sourceSpeed.toFixed(2)} su/s</b>  vector <b>${diagnostic.coordinateShear.displacement.x.toFixed(4)}, ${diagnostic.coordinateShear.displacement.y.toFixed(4)} su</b>${diagnostic.capabilities?.coordinateShear === false ? '  (GPU unavailable)' : ''}`,
       `ripple   <b>${diagnostic.rippleDisplacement.enabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.rippleDisplacement.gain.toFixed(2)}</b>  active <b>${diagnostic.rippleDisplacement.activeEventCount}/${diagnostic.rippleDisplacement.capacity}</b>${diagnostic.capabilities?.rippleDisplacement === false ? '  (GPU unavailable)' : ''}`,
+      `membrane <b>${diagnostic.membraneResponse.enabled ? 'on' : 'off'}</b>  radial/tangent <b>${diagnostic.membraneResponse.radialDisplacement.toFixed(4)} / ${diagnostic.membraneResponse.tangentialDisplacement.toFixed(4)} su</b>  radius <b>${diagnostic.membraneResponse.radius.toFixed(2)}</b>  waves <b>${diagnostic.membraneResponse.activeWaveCount}/${diagnostic.membraneResponse.waveCapacity}</b>${diagnostic.capabilities?.membraneResponse === false ? '  (GPU unavailable)' : ''}`,
       `clocks   animation ${diagnostic.clocks.animation.toFixed(2)}  flow ${diagnostic.clocks.flow.toFixed(2)}  light ${diagnostic.clocks.lighting.toFixed(2)}  events ${diagnostic.clocks.events.toFixed(2)}`,
       `events   ${diagnostic.transientEventCount}/${diagnostic.transientCapacity}  locks ${diagnostic.lockCount}  tx ${diagnostic.lastTransaction.accepted}/${diagnostic.lastTransaction.skipped}/${diagnostic.lastTransaction.rejected}`,
       `mode     ${state.diag}${state.paused ? '  ·  PAUSED' : ''}`,
@@ -217,50 +242,84 @@ async function boot() {
     motionWarpConfiguration: () => engine.getMotionWarpConfiguration(),
     motionWarp: (changes) => {
       const report = engine.setMotionWarp(changes);
-      if (report.changed) { app.ui?.sync(); persistSoon(); }
+      if (report.changed) {
+        markInteractionProfileCustom(labState);
+        app.ui?.sync(); persistSoon();
+      }
       return report;
     },
     activeDeformationConfiguration: () => engine.getActiveDeformationConfiguration(),
     activeDeformation: (changes) => {
       const report = engine.setActiveDeformation(changes);
-      if (report.changed) { app.ui?.sync(); persistSoon(); }
+      if (report.changed) {
+        markInteractionProfileCustom(labState);
+        app.ui?.sync(); persistSoon();
+      }
       return report;
     },
     coordinateShearConfiguration: () => engine.getCoordinateShearConfiguration(),
     coordinateShear: (changes) => {
       const report = engine.setCoordinateShear(changes);
-      if (report.changed) { app.ui?.sync(); persistSoon(); }
+      if (report.changed) {
+        markInteractionProfileCustom(labState);
+        app.ui?.sync(); persistSoon();
+      }
       return report;
     },
     rippleDisplacementConfiguration: () => engine.getRippleDisplacementConfiguration(),
     rippleDisplacement: (changes) => {
       const report = engine.setRippleDisplacement(changes);
-      if (report.changed) { app.ui?.sync(); persistSoon(); }
+      if (report.changed) {
+        markInteractionProfileCustom(labState);
+        app.ui?.sync(); persistSoon();
+      }
+      return report;
+    },
+    membraneResponseConfiguration: () => engine.getMembraneResponseConfiguration(),
+    membraneResponse: (changes) => {
+      const report = engine.setMembraneResponse(changes);
+      if (report.changed) {
+        markInteractionProfileCustom(labState);
+        app.ui?.sync(); persistSoon();
+      }
+      return report;
+    },
+    interactionProfile: (name) => {
+      const report = applyInteractionProfile(engine, labState, name);
+      if (report.ok) {
+        configureEventTriggers();
+        app.ui?.sync();
+        persistSoon();
+      }
       return report;
     },
     rippleOnClick: (enabled) => {
       labState.rippleOnClick = enabled === true;
       app.rippleTriggers.configure({ clickEnabled: labState.rippleOnClick });
+      markInteractionProfileCustom(labState);
+      app.ui?.sync();
       persistSoon();
     },
     rippleDuringDrag: (enabled) => {
       labState.rippleDuringDrag = enabled === true;
       app.rippleTriggers.configure({ dragEnabled: labState.rippleDuringDrag });
+      markInteractionProfileCustom(labState);
+      app.ui?.sync();
       persistSoon();
     },
-    fixedInteractionBaseline: () => {
-      const passive = engine.setMotionWarp({ enabled: false });
-      const active = engine.setActiveDeformation({
-        legacyFixedEnabled: true,
-        pressEnabled: false,
-        dragEnabled: false,
-      });
-      const shear = engine.setCoordinateShear({ enabled: false });
-      const ripple = engine.setRippleDisplacement({ enabled: false });
-      if (passive.changed || active.changed || shear.changed || ripple.changed) {
-        app.ui?.sync();
-        persistSoon();
-      }
+    membraneWaveOnPress: (enabled) => {
+      labState.membraneWaveOnPress = enabled === true;
+      app.membraneTriggers.configure({ clickEnabled: labState.membraneWaveOnPress });
+      markInteractionProfileCustom(labState);
+      app.ui?.sync();
+      persistSoon();
+    },
+    membraneWaveDuringDrag: (enabled) => {
+      labState.membraneWaveDuringDrag = enabled === true;
+      app.membraneTriggers.configure({ dragEnabled: labState.membraneWaveDuringDrag });
+      markInteractionProfileCustom(labState);
+      app.ui?.sync();
+      persistSoon();
     },
     preset: (name) => {
       if (engine.applyPreset(name).ok) { app.ui?.sync(); persistSoon(); }
@@ -279,10 +338,7 @@ async function boot() {
       clearLabState();
       engine.factoryReset();
       resetLabUiState(labState);
-      app.rippleTriggers.configure({
-        clickEnabled: labState.rippleOnClick,
-        dragEnabled: labState.rippleDuringDrag,
-      });
+      configureEventTriggers();
       applyPanelVisibility();
       app.ui?.sync();
       saveLabState(engine, labState);
@@ -351,10 +407,7 @@ async function boot() {
     try {
       const parsed = JSON.parse(text.value);
       if (applyLabSnapshot(engine, labState, parsed, { preserveLocks: true })) {
-        app.rippleTriggers.configure({
-          clickEnabled: labState.rippleOnClick,
-          dragEnabled: labState.rippleDuringDrag,
-        });
+        configureEventTriggers();
         applyPanelVisibility();
         app.ui?.sync();
         saveLabState(engine, labState);
@@ -379,11 +432,19 @@ async function boot() {
       engine.emitTransientEvent(createRippleDisplacementEvent({ origin }));
     }
   };
+  const emitMembraneOrigins = (origins) => {
+    const configuration = engine.getMembraneResponseConfiguration();
+    if (!configuration.enabled || !configuration.waveEnabled) return;
+    for (const origin of origins) {
+      engine.emitTransientEvent(createMembraneWaveEvent({ origin }));
+    }
+  };
   for (const target of [canvas, fallbackCanvas]) {
     target.addEventListener('pointermove', () => {
       submitInfluence();
       if (app.pointer.influence.engaged) {
         emitRippleOrigins(app.rippleTriggers.move(app.pointer.influence.position));
+        emitMembraneOrigins(app.membraneTriggers.move(app.pointer.influence.position));
       }
       if (labState.probe) updateProbe(false);
     });
@@ -391,11 +452,18 @@ async function boot() {
       submitInfluence();
       if (app.pointer.influence.engaged) {
         emitRippleOrigins(app.rippleTriggers.begin(app.pointer.influence.position));
+        emitMembraneOrigins(app.membraneTriggers.begin(app.pointer.influence.position));
       }
       if (labState.probe) updateProbe(true);
     });
-    target.addEventListener('pointerup', () => app.rippleTriggers.end());
-    target.addEventListener('pointercancel', () => app.rippleTriggers.end());
+    target.addEventListener('pointerup', () => {
+      app.rippleTriggers.end();
+      app.membraneTriggers.end();
+    });
+    target.addEventListener('pointercancel', () => {
+      app.rippleTriggers.end();
+      app.membraneTriggers.end();
+    });
   }
 
   window.addEventListener('keydown', (event) => {

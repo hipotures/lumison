@@ -49,6 +49,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
       activeDeformation,
       coordinateShear,
       rippleDisplacement,
+      membraneResponse,
       renderScale,
     }) {
       const aspect = logicalAspect();
@@ -75,6 +76,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
             activeDeformation,
             coordinateShear,
             rippleDisplacement,
+            membraneResponse,
           });
           host.renderer.render(host.stage.scene, host.stage.camera);
           return { aspect: fittedAspect };
@@ -119,6 +121,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
           activeDeformation: Boolean(host.renderer && host.stage),
           coordinateShear: Boolean(host.renderer && host.stage),
           rippleDisplacement: Boolean(host.renderer && host.stage),
+          membraneResponse: Boolean(host.renderer && host.stage),
         },
       };
     },

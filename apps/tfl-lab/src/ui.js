@@ -5,6 +5,7 @@
 import {
   PARAM_DEFS, QUALITY_LEVELS, DIAG_MODES, TARGET_FPS_OPTIONS, PRESET_NAMES,
 } from '../../../packages/tfl-engine/src/index.js';
+import { INTERACTION_PROFILE_NAMES } from './interaction-profiles.js';
 import { formatNum } from './util.js';
 
 const GROUPS = [
@@ -120,11 +121,22 @@ export function buildUI(root, state, labState, A) {
   const initialActiveDeformation = A.activeDeformationConfiguration();
   const initialCoordinateShear = A.coordinateShearConfiguration();
   const initialRippleDisplacement = A.rippleDisplacementConfiguration();
-  const baselineButton = el('button', 'btn small', 'Fixed baseline');
-  baselineButton.addEventListener('click', () => A.fixedInteractionBaseline());
-  const baselineRow = el('div', 'btn-row');
-  baselineRow.append(baselineButton);
-  interaction.append(baselineRow);
+  const initialMembraneResponse = A.membraneResponseConfiguration();
+  const profileSelect = document.createElement('select');
+  profileSelect.id = 'selInteractionProfile';
+  profileSelect.setAttribute('aria-label', 'Interaction profile');
+  for (const name of INTERACTION_PROFILE_NAMES) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    profileSelect.append(option);
+  }
+  profileSelect.value = labState.interactionProfile;
+  profileSelect.addEventListener('change', () => A.interactionProfile(profileSelect.value));
+  interaction.append(kvRow('Interaction profile', profileSelect));
+  interaction.append(hint(
+    'Profiles change interaction mechanisms only. Manual changes select Custom; film preset, optics, quality and locks stay untouched.',
+  ));
   interaction.append(toggleRow(
     'Legacy Fixed response (includes thickness shear)',
     initialActiveDeformation.legacyFixedEnabled,
@@ -201,8 +213,50 @@ export function buildUI(root, state, labState, A) {
     labState.rippleDuringDrag,
     (enabled) => A.rippleDuringDrag(enabled),
   ));
+  interaction.append(toggleRow(
+    'Mobile Membrane',
+    initialMembraneResponse.enabled,
+    (enabled) => A.membraneResponse({ enabled }),
+  ));
+  const membraneRadialGain = rangeRow(
+    'Membrane Radial Gain', -2, 2, 0.05, initialMembraneResponse.radialGain,
+    (radialGain) => A.membraneResponse({ radialGain }),
+  );
+  const membraneTangentialGain = rangeRow(
+    'Membrane Swirl Gain', -2, 2, 0.05, initialMembraneResponse.tangentialGain,
+    (tangentialGain) => A.membraneResponse({ tangentialGain }),
+  );
+  const membraneRadius = rangeRow(
+    'Membrane Radius', 0.12, 0.9, 0.01, initialMembraneResponse.radius,
+    (radius) => A.membraneResponse({ radius }),
+  );
+  interaction.append(
+    membraneRadialGain.root,
+    membraneTangentialGain.root,
+    membraneRadius.root,
+  );
+  interaction.append(toggleRow(
+    'Membrane Wave',
+    initialMembraneResponse.waveEnabled,
+    (waveEnabled) => A.membraneResponse({ waveEnabled }),
+  ));
+  const membraneWaveGain = rangeRow(
+    'Membrane Wave Gain', 0, 2, 0.05, initialMembraneResponse.waveGain,
+    (waveGain) => A.membraneResponse({ waveGain }),
+  );
+  interaction.append(membraneWaveGain.root);
+  interaction.append(toggleRow(
+    'Membrane Wave on Press',
+    labState.membraneWaveOnPress,
+    (enabled) => A.membraneWaveOnPress(enabled),
+  ));
+  interaction.append(toggleRow(
+    'Membrane Waves During Drag',
+    labState.membraneWaveDuringDrag,
+    (enabled) => A.membraneWaveDuringDrag(enabled),
+  ));
   interaction.append(hint(
-    'Press, Drag, Coordinate Shear and Ripple Displacement alter structural coordinates. Timed ripples stay at their event origins; drag events use a fixed 0.075 surface-unit spacing. The legacy toggle includes Fixed\'s scalar thickness shear.',
+    'All enabled mechanisms alter structural coordinates. Qwen ripples and Mobile membrane waves are separate anchored event types. The legacy toggle includes Fixed\'s scalar thickness shear.',
   ));
 
   // ---- rendering extras ----
@@ -359,6 +413,27 @@ export function buildUI(root, state, labState, A) {
     if (rippleOnClick) rippleOnClick.checked = labState.rippleOnClick;
     const ripplesDuringDrag = root.querySelector('input[aria-label="Ripples During Drag"]');
     if (ripplesDuringDrag) ripplesDuringDrag.checked = labState.rippleDuringDrag;
+    const interactionProfile = root.querySelector('#selInteractionProfile');
+    if (interactionProfile) interactionProfile.value = labState.interactionProfile;
+    const membraneResponse = A.membraneResponseConfiguration();
+    const membrane = root.querySelector('input[aria-label="Mobile Membrane"]');
+    if (membrane) membrane.checked = membraneResponse.enabled;
+    membraneRadialGain.input.value = String(membraneResponse.radialGain);
+    membraneRadialGain.output.textContent = formatNum(membraneResponse.radialGain, 0.05);
+    membraneTangentialGain.input.value = String(membraneResponse.tangentialGain);
+    membraneTangentialGain.output.textContent = formatNum(membraneResponse.tangentialGain, 0.05);
+    membraneRadius.input.value = String(membraneResponse.radius);
+    membraneRadius.output.textContent = formatNum(membraneResponse.radius, 0.01);
+    const membraneWave = root.querySelector('input[aria-label="Membrane Wave"]');
+    if (membraneWave) membraneWave.checked = membraneResponse.waveEnabled;
+    membraneWaveGain.input.value = String(membraneResponse.waveGain);
+    membraneWaveGain.output.textContent = formatNum(membraneResponse.waveGain, 0.05);
+    const membraneWaveOnPress = root.querySelector('input[aria-label="Membrane Wave on Press"]');
+    if (membraneWaveOnPress) membraneWaveOnPress.checked = labState.membraneWaveOnPress;
+    const membraneWavesDuringDrag = root.querySelector('input[aria-label="Membrane Waves During Drag"]');
+    if (membraneWavesDuringDrag) {
+      membraneWavesDuringDrag.checked = labState.membraneWaveDuringDrag;
+    }
     const pr = root.querySelector('input[aria-label="Surface probe"]');
     if (pr) pr.checked = labState.probe;
     pauseBtn.textContent = state.paused ? '▶' : '⏸';

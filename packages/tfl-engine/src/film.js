@@ -24,6 +24,13 @@ import {
   RIPPLE_DISPLACEMENT_CAPACITY,
   RIPPLE_EVENT_DEFAULTS,
 } from './ripple-displacement.js';
+import {
+  MEMBRANE_RESPONSE_CALIBRATION,
+  MEMBRANE_RESPONSE_DEFAULTS,
+  MEMBRANE_WAVE_CALIBRATION,
+  MEMBRANE_WAVE_CAPACITY,
+  MEMBRANE_WAVE_DEFAULTS,
+} from './membrane-response.js';
 
 export const QUALITY_SPEC = {
   Low:    { oct: 3, spec: 5,  central: false, micro: 0, fineOct: 0 },
@@ -154,6 +161,26 @@ export function createFilmMaterial(qualityName) {
       )),
     ),
     uRippleEnabled: uniform(0),
+    // Mobile-inspired broad continuous response: center/radius/gate plus
+    // signed radial and counter-clockwise tangential coefficients.
+    uMembraneResponse: uniform(new Vector4(0, 0, 0.48, 0)),
+    uMembraneVector: uniform(new Vector2(0, 0)),
+    // Membrane wave events are distinct from Qwen ripple events even though
+    // both use the same bounded source-neutral transient store.
+    uMembraneWaveEvents: Array.from(
+      { length: MEMBRANE_WAVE_CAPACITY },
+      () => uniform(new Vector4(0, 0, 0, 0)),
+    ),
+    uMembraneWaveParameters: Array.from(
+      { length: MEMBRANE_WAVE_CAPACITY },
+      () => uniform(new Vector4(
+        MEMBRANE_WAVE_DEFAULTS.wavelength,
+        MEMBRANE_WAVE_DEFAULTS.propagationSpeed,
+        MEMBRANE_WAVE_DEFAULTS.width,
+        1,
+      )),
+    ),
+    uMembraneWaveEnabled: uniform(0),
     uMode: uniform(0),
     uFlowSpeed: uniform(1), uFlowScale: uniform(1.3),
     uTurb: uniform(1), uWarp: uniform(1.1), uVort: uniform(1),
@@ -311,7 +338,67 @@ export function createFilmMaterial(qualityName) {
         .div(max(rippleMagnitude, 0.0001)),
     );
     const boundedRippleOffset = rippleOffset.mul(rippleBound).mul(2.0);
-    const structuralSt = st.add(activeOffset).add(shearOffset).add(boundedRippleOffset);
+    // Mobile-inspired analytic membrane response. A broad Gaussian footprint
+    // combines signed radial displacement with a perpendicular/tangential
+    // component. It is evaluated before every Fixed structural stage and has
+    // no persistent field, thickness, normal, light or color term.
+    const membraneDelta = fixedSt.mul(0.5).sub(U.uMembraneResponse.xy);
+    const membraneDistance = sqrt(membraneDelta.dot(membraneDelta));
+    const membraneDirection = membraneDelta.div(max(membraneDistance, 0.0001));
+    const membraneTangent = vec2(membraneDirection.y.negate(), membraneDirection.x);
+    const membraneRadius2 = max(
+      U.uMembraneResponse.z.mul(U.uMembraneResponse.z),
+      0.0144,
+    );
+    const membraneEnvelope = exp(
+      membraneDelta.dot(membraneDelta).div(membraneRadius2).negate(),
+    ).mul(U.uMembraneResponse.w);
+    const membraneContinuous = membraneDirection.mul(U.uMembraneVector.x)
+      .add(membraneTangent.mul(U.uMembraneVector.y))
+      .mul(membraneEnvelope);
+
+    // The wider membrane wave has its own event identity and envelope. It can
+    // be compared with Qwen ripple displacement or combined deliberately.
+    const membraneWaveOffset = vec2(0.0, 0.0).toVar();
+    If(U.uMembraneWaveEnabled.greaterThan(0.0), () => {
+      for (let index = 0; index < MEMBRANE_WAVE_CAPACITY; index++) {
+        const event = U.uMembraneWaveEvents[index];
+        const parameters = U.uMembraneWaveParameters[index];
+        If(event.w.greaterThan(0.0), () => {
+          const waveDelta = fixedSt.mul(0.5).sub(event.xy);
+          const waveDistance = sqrt(waveDelta.dot(waveDelta));
+          const waveDirection = waveDelta.div(max(waveDistance, 0.0001));
+          const waveFront = event.z.mul(parameters.y);
+          const fromFront = waveDistance.sub(waveFront);
+          const phase = fromFront.mul(6.2831853).div(max(parameters.x, 0.08));
+          const frontWidth2 = max(parameters.z.mul(parameters.z).mul(2.0), 0.005);
+          const frontEnvelope = exp(fromFront.mul(fromFront).div(frontWidth2).negate());
+          const progress = clamp(event.z.div(max(parameters.w, 0.2)), 0.0, 1.0);
+          const recovery = float(1.0).sub(progress).mul(float(1.0).sub(progress));
+          membraneWaveOffset.assign(membraneWaveOffset.add(
+            waveDirection.mul(sin(phase).mul(frontEnvelope).mul(recovery).mul(event.w)),
+          ));
+        });
+      }
+    });
+    const membraneWaveMagnitude = sqrt(membraneWaveOffset.dot(membraneWaveOffset));
+    const membraneWaveBound = min(
+      1.0,
+      float(MEMBRANE_WAVE_CALIBRATION.maximumCombinedDisplacement)
+        .div(max(membraneWaveMagnitude, 0.0001)),
+    );
+    const membraneOffset = membraneContinuous.add(
+      membraneWaveOffset.mul(membraneWaveBound),
+    );
+    const membraneMagnitude = sqrt(membraneOffset.dot(membraneOffset));
+    const membraneBound = min(
+      1.0,
+      float(MEMBRANE_RESPONSE_CALIBRATION.maximumCombinedDisplacement)
+        .div(max(membraneMagnitude, 0.0001)),
+    );
+    const boundedMembraneOffset = membraneOffset.mul(membraneBound).mul(2.0);
+    const structuralSt = st.add(activeOffset).add(shearOffset)
+      .add(boundedRippleOffset).add(boundedMembraneOffset);
 
     const pack0 = advected(structuralSt);
     // Pointer push: velocity advects coordinates near the cursor.
@@ -527,6 +614,37 @@ export function updateUniforms(U, s, env) {
       event?.wavelength ?? RIPPLE_EVENT_DEFAULTS.wavelength,
       event?.propagationSpeed ?? RIPPLE_EVENT_DEFAULTS.propagationSpeed,
       event?.width ?? RIPPLE_EVENT_DEFAULTS.width,
+      event?.lifetime ?? 1,
+    );
+  }
+  const membrane = env.membraneResponse;
+  const membraneEnabled = membrane?.enabled === true && membrane.effectiveStrength > 0;
+  U.uMembraneResponse.value.set(
+    membrane?.position?.x ?? 0,
+    membrane?.position?.y ?? 0,
+    membrane?.radius ?? MEMBRANE_RESPONSE_DEFAULTS.radius,
+    membraneEnabled ? 1 : 0,
+  );
+  U.uMembraneVector.value.set(
+    membraneEnabled ? membrane.radialDisplacement : 0,
+    membraneEnabled ? membrane.tangentialDisplacement : 0,
+  );
+  U.uMembraneWaveEnabled.value = membrane?.enabled === true
+    && membrane?.waveEnabled === true && membrane.activeWaveCount > 0 ? 1 : 0;
+  for (let index = 0; index < MEMBRANE_WAVE_CAPACITY; index++) {
+    const event = membrane?.events?.[index];
+    U.uMembraneWaveEvents[index].value.set(
+      event?.position?.x ?? 0,
+      event?.position?.y ?? 0,
+      event?.age ?? 0,
+      membrane?.enabled === true && membrane?.waveEnabled === true
+        ? event?.displacement ?? 0
+        : 0,
+    );
+    U.uMembraneWaveParameters[index].value.set(
+      event?.wavelength ?? MEMBRANE_WAVE_DEFAULTS.wavelength,
+      event?.propagationSpeed ?? MEMBRANE_WAVE_DEFAULTS.propagationSpeed,
+      event?.width ?? MEMBRANE_WAVE_DEFAULTS.width,
       event?.lifetime ?? 1,
     );
   }

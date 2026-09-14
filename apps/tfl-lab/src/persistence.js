@@ -7,6 +7,9 @@ export function createLabState() {
     panelCollapsed: {},
     rippleOnClick: true,
     rippleDuringDrag: false,
+    membraneWaveOnPress: true,
+    membraneWaveDuringDrag: false,
+    interactionProfile: 'Fixed baseline',
   };
 }
 
@@ -17,6 +20,9 @@ export function snapshotLab(engine, labState) {
     panelOpen: labState.panelOpen,
     rippleOnClick: labState.rippleOnClick,
     rippleDuringDrag: labState.rippleDuringDrag,
+    membraneWaveOnPress: labState.membraneWaveOnPress,
+    membraneWaveDuringDrag: labState.membraneWaveDuringDrag,
+    interactionProfile: labState.interactionProfile,
   };
 }
 
@@ -28,6 +34,19 @@ export function applyLabSnapshot(engine, labState, saved, options = {}) {
   if (typeof saved.rippleOnClick === 'boolean') labState.rippleOnClick = saved.rippleOnClick;
   if (typeof saved.rippleDuringDrag === 'boolean') {
     labState.rippleDuringDrag = saved.rippleDuringDrag;
+  }
+  if (typeof saved.membraneWaveOnPress === 'boolean') {
+    labState.membraneWaveOnPress = saved.membraneWaveOnPress;
+  }
+  if (typeof saved.membraneWaveDuringDrag === 'boolean') {
+    labState.membraneWaveDuringDrag = saved.membraneWaveDuringDrag;
+  }
+  if (['Fixed baseline', 'Qwen-like', 'Mobile-like', 'Custom'].includes(saved.interactionProfile)) {
+    labState.interactionProfile = saved.interactionProfile;
+  } else if (saved.interactions) {
+    // Phase 3A-D snapshots predate named profiles and may contain arbitrary
+    // accepted settings. Preserve them and label them honestly.
+    labState.interactionProfile = 'Custom';
   }
   return true;
 }
@@ -59,4 +78,7 @@ export function resetLabUiState(labState) {
   labState.panelCollapsed = {};
   labState.rippleOnClick = true;
   labState.rippleDuringDrag = false;
+  labState.membraneWaveOnPress = true;
+  labState.membraneWaveDuringDrag = false;
+  labState.interactionProfile = 'Fixed baseline';
 }

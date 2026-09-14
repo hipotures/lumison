@@ -152,6 +152,7 @@ export function pushFrameUniforms(stage, state, env) {
     activeDeformation: env.activeDeformation,
     coordinateShear: env.coordinateShear,
     rippleDisplacement: env.rippleDisplacement,
+    membraneResponse: env.membraneResponse,
     mode: DIAG_MODES.indexOf(state.diag),
   });
 }

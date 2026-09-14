@@ -29,6 +29,18 @@ import {
   restoreMotionWarpRuntime,
   snapshotMotionWarpRuntime,
 } from './motion-warp.js';
+import {
+  advanceMembraneResponse,
+  configureMembraneResponse,
+  createMembraneResponseState,
+  MEMBRANE_RESPONSE_DEFAULTS,
+  MEMBRANE_WAVE_EVENT_TYPE,
+  membraneResponseConfiguration,
+  membraneResponseRenderState,
+  restoreMembraneResponseRuntime,
+  snapshotMembraneResponseRuntime,
+  validateMembraneWaveEvent,
+} from './membrane-response.js';
 import { adaptiveTick, createAdaptive, createPerf, perfTick } from './perf.js';
 import { applyPreset, mutate, randomize, resetParameters } from './presets.js';
 import { sampleSurface } from './probe.js';
@@ -90,6 +102,7 @@ export class TflEngine {
     this.activeDeformation = createActiveDeformationState();
     this.coordinateShear = createCoordinateShearState();
     this.rippleDisplacement = createRippleDisplacementState();
+    this.membraneResponse = createMembraneResponseState();
     this.events = createTransientStore(eventCapacity);
     this.viewport = { aspect: 1 };
     this.lastProbeTime = -Infinity;
@@ -187,6 +200,7 @@ export class TflEngine {
     this.activeDeformation = createActiveDeformationState();
     this.coordinateShear = createCoordinateShearState();
     this.rippleDisplacement = createRippleDisplacementState();
+    this.membraneResponse = createMembraneResponseState();
     this.events = createTransientStore(this.events.capacity);
     this.#rebuildQuality();
     return report;
@@ -290,9 +304,24 @@ export class TflEngine {
     return rippleDisplacementConfiguration(this.rippleDisplacement);
   }
 
+  setMembraneResponse(changes) {
+    return configureMembraneResponse(this.membraneResponse, changes);
+  }
+
+  getMembraneResponseConfiguration() {
+    return membraneResponseConfiguration(this.membraneResponse);
+  }
+
   emitTransientEvent(event) {
     if (event?.type === RIPPLE_DISPLACEMENT_EVENT_TYPE) {
       const validation = validateRippleDisplacementEvent(event);
+      if (!validation.ok) {
+        return { accepted: false, reason: validation.reason, slot: null, evicted: null };
+      }
+      return addTransientEvent(this.events, validation.value);
+    }
+    if (event?.type === MEMBRANE_WAVE_EVENT_TYPE) {
+      const validation = validateMembraneWaveEvent(event);
       if (!validation.ok) {
         return { accepted: false, reason: validation.reason, slot: null, evicted: null };
       }
@@ -315,6 +344,7 @@ export class TflEngine {
     advanceMotionWarp(this.motionWarp, this.influence, dt);
     advanceActiveDeformation(this.activeDeformation, this.influence, dt);
     advanceCoordinateShear(this.coordinateShear, this.influence, dt);
+    advanceMembraneResponse(this.membraneResponse, this.influence, dt);
     perfTick(this.perf, dt * 1000);
     const scale = this.state.adaptive
       ? this.adaptiveScale
@@ -358,6 +388,10 @@ export class TflEngine {
         this.rippleDisplacement,
         this.events,
       ),
+      membraneResponse: membraneResponseRenderState(
+        this.membraneResponse,
+        this.events,
+      ),
       renderScale: this.state.effective.renderScale,
     });
     if (result?.aspect) this.viewport.aspect = normalizeAspect(result.aspect);
@@ -376,6 +410,7 @@ export class TflEngine {
       activeDeformation: activeDeformationConfiguration(this.activeDeformation),
       coordinateShear: coordinateShearConfiguration(this.coordinateShear),
       rippleDisplacement: rippleDisplacementConfiguration(this.rippleDisplacement),
+      membraneResponse: membraneResponseConfiguration(this.membraneResponse),
     };
     if (includeRuntime) {
       saved.runtime.influence = cloneInfluence(this.influence);
@@ -386,6 +421,7 @@ export class TflEngine {
       saved.runtime.motionWarp = snapshotMotionWarpRuntime(this.motionWarp);
       saved.runtime.activeDeformation = snapshotActiveDeformationRuntime(this.activeDeformation);
       saved.runtime.coordinateShear = snapshotCoordinateShearRuntime(this.coordinateShear);
+      saved.runtime.membraneResponse = snapshotMembraneResponseRuntime(this.membraneResponse);
     }
     return saved;
   }
@@ -397,6 +433,7 @@ export class TflEngine {
     let restoredActiveDeformation = null;
     let restoredCoordinateShear = null;
     let restoredRippleDisplacement = null;
+    let restoredMembraneResponse = null;
     const savedMotionWarp = saved?.interactions?.motionWarp;
     if (savedMotionWarp !== undefined) {
       restoredMotionWarp = createMotionWarpState();
@@ -436,6 +473,18 @@ export class TflEngine {
       );
       if (!rippleReport.ok || rippleReport.accepted.length !== 2) {
         return { ok: false, reason: 'invalid-ripple-displacement-configuration' };
+      }
+    }
+    const savedMembraneResponse = saved?.interactions?.membraneResponse;
+    if (savedMembraneResponse !== undefined) {
+      restoredMembraneResponse = createMembraneResponseState();
+      const membraneReport = configureMembraneResponse(
+        restoredMembraneResponse,
+        savedMembraneResponse,
+      );
+      if (!membraneReport.ok
+        || membraneReport.accepted.length !== Object.keys(MEMBRANE_RESPONSE_DEFAULTS).length) {
+        return { ok: false, reason: 'invalid-membrane-response-configuration' };
       }
     }
     if (options.restoreRuntime) {
@@ -479,6 +528,16 @@ export class TflEngine {
         }
         restoredCoordinateShear = target;
       }
+      if (saved?.runtime?.membraneResponse !== undefined) {
+        const target = restoredMembraneResponse
+          ?? createMembraneResponseState(
+            membraneResponseConfiguration(this.membraneResponse),
+          );
+        if (!restoreMembraneResponseRuntime(target, saved.runtime.membraneResponse)) {
+          return { ok: false, reason: 'invalid-membrane-response-runtime' };
+        }
+        restoredMembraneResponse = target;
+      }
     }
     const result = applySnapshot(this.state, saved, options);
     if (!result.ok) return result;
@@ -503,6 +562,7 @@ export class TflEngine {
     if (restoredActiveDeformation) this.activeDeformation = restoredActiveDeformation;
     if (restoredCoordinateShear) this.coordinateShear = restoredCoordinateShear;
     if (restoredRippleDisplacement) this.rippleDisplacement = restoredRippleDisplacement;
+    if (restoredMembraneResponse) this.membraneResponse = restoredMembraneResponse;
     this.#rebuildQuality();
     return result;
   }
@@ -563,6 +623,10 @@ export class TflEngine {
       ),
       rippleDisplacement: rippleDisplacementRenderState(
         this.rippleDisplacement,
+        this.events,
+      ),
+      membraneResponse: membraneResponseRenderState(
+        this.membraneResponse,
         this.events,
       ),
       transientEventCount: activeTransientCount(this.events),
