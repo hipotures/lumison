@@ -87,9 +87,9 @@ html, body {
 .icon-btn[aria-pressed="true"] { color: var(--acc); background: var(--acc-dim); }
 
 .panel-fixed { flex: 0 0 auto; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-.action-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
-.action-strip .btn { padding: 7px 2px; font-size: 10px; }
-.secondary-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 4px; }
+.action-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.action-strip .btn { padding: 7px 2px; font-size: 10px; white-space: nowrap; }
+.secondary-actions { grid-template-columns: 1fr 1fr 1fr 1.5fr; margin-top: 4px; }
 .panel-footer { flex: 0 0 auto; padding: 6px 12px; border-top: 1px solid var(--line); }
 .panel-body { display: flex; flex-direction: column; overflow: hidden; min-height: 0; padding: 4px 12px 8px; flex: 1 1 auto; }
 .sec-body { overflow-y: auto; min-height: 0; scrollbar-width: thin; overscroll-behavior: contain; padding-right: 3px; }

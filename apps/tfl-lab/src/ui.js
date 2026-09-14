@@ -40,7 +40,6 @@ export function buildUI(root, state, labState, A) {
     ['Pause', () => A.togglePause()],
     ['Mutate', () => A.mutate()],
     ['Random', () => A.randomize()],
-    ['Reset', () => A.resetAll()],
     ['Capture', () => A.capture()],
   ]) {
     const button = el('button', 'btn', label);
@@ -65,7 +64,8 @@ export function buildUI(root, state, labState, A) {
   for (const [label, callback] of [
     ['Export', () => A.exportSettings()],
     ['Import', () => A.importSettings()],
-    ['Factory Reset', () => A.factoryReset()],
+    ['Reset', () => A.resetAll()],
+    ['Full Reset', () => A.factoryReset()],
   ]) {
     const button = el('button', 'btn', label);
     button.addEventListener('click', callback);
@@ -176,9 +176,6 @@ export function buildUI(root, state, labState, A) {
   profileSelect.value = labState.interactionProfile;
   profileSelect.addEventListener('change', () => A.interactionProfile(profileSelect.value));
   interaction.append(kvRow('Interaction profile', profileSelect));
-  interaction.append(hint(
-    'Profiles change interaction mechanisms only. Manual changes select Custom; film preset, optics, quality and locks stay untouched.',
-  ));
   interaction.append(toggleRow(
     'Passive Warp',
     initialMotionWarp.enabled,
@@ -193,9 +190,6 @@ export function buildUI(root, state, labState, A) {
     (radius) => A.motionWarp({ radius }),
   );
   interaction.append(passiveGain.root, passiveRadius.root);
-  interaction.append(hint(
-    'Optional GPU domain displacement from motion. Canvas2D cannot reproduce this structural effect.',
-  ));
   interaction.append(toggleRow(
     'Active Press',
     initialActiveDeformation.pressEnabled,
@@ -291,9 +285,6 @@ export function buildUI(root, state, labState, A) {
     'Membrane Waves During Drag',
     labState.membraneWaveDuringDrag,
     (enabled) => A.membraneWaveDuringDrag(enabled),
-  ));
-  interaction.append(hint(
-    'All enabled mechanisms alter structural coordinates. Qwen ripples and Mobile membrane waves are separate anchored event types.',
   ));
 
   // ---- rendering extras ----

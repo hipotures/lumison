@@ -477,7 +477,7 @@ async function boot() {
 
   window.addEventListener('keydown', (event) => {
     const target = event.target;
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+    if (target && ((target.tagName === 'INPUT' && target.type !== 'range') || target.tagName === 'TEXTAREA'
       || target.tagName === 'SELECT' || target.isContentEditable)) return;
     if (event.code === 'Space') { event.preventDefault(); actions.togglePause(); }
     else if (event.key === 'm' || event.key === 'M') actions.mutate();
