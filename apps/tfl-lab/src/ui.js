@@ -53,50 +53,30 @@ export function buildUI(root, state, labState, A) {
     }
   }
   fixed.append(actions);
-  const utilities = el('div', 'panel-utilities');
+  const footer = el('div', 'panel-footer');
   const diag = el('aside', 'diagnostics-hud', 'starting…');
   diag.id = 'diag';
   diag.hidden = true;
   diag.setAttribute('aria-label', 'Diagnostics');
-  utilities.append(toggleRow('Diagnostics', false, (enabled) => {
+  footer.append(toggleRow('Diagnostics', false, (enabled) => {
     diag.hidden = !enabled;
   }));
-  const more = el('details', 'overflow-menu');
-  more.append(el('summary', 'btn small', 'More'));
-  const menu = el('div', 'overflow-actions');
+  const secondaryActions = el('div', 'action-strip secondary-actions');
   for (const [label, callback] of [
     ['Export', () => A.exportSettings()],
     ['Import', () => A.importSettings()],
     ['Factory Reset', () => A.factoryReset()],
   ]) {
     const button = el('button', 'btn', label);
-    button.addEventListener('click', () => {
-      more.open = false;
-      callback();
-    });
-    menu.append(button);
+    button.addEventListener('click', callback);
+    secondaryActions.append(button);
   }
-  more.append(menu);
-  more.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && more.open) {
-      more.open = false;
-      more.querySelector('summary').focus();
-      event.stopPropagation();
-    }
-  });
-  root.addEventListener('focusout', (event) => {
-    if (!more.contains(event.relatedTarget)) more.open = false;
-  });
-  root.addEventListener('click', (event) => {
-    if (!more.contains(event.target)) more.open = false;
-  });
-  utilities.append(more);
-  fixed.append(utilities);
+  fixed.append(secondaryActions);
   root.append(fixed);
 
   const body = el('div', 'panel-body');
   body.id = 'panelBody';
-  root.append(body);
+  root.append(body, footer);
 
   const sliders = {};   // name -> {input, output}
   const sections = {};
