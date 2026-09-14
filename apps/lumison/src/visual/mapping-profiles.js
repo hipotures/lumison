@@ -1,0 +1,58 @@
+export const MUSICAL_FIELD_V1 = Object.freeze({
+  id: 'musical-field-v1',
+  name: 'Musical Field v1',
+  pitch: Object.freeze({ minimum: 21, maximum: 108 }),
+  transient: Object.freeze({
+    horizontalMargin: 0.08,
+    strongAttackY: 0.32,
+    softAttackY: 0.68,
+    amplitudeMinimum: 0.16,
+    amplitudeMaximum: 1.25,
+    amplitudeExponent: 0.72,
+    wavelengthLowPitch: 0.16,
+    wavelengthHighPitch: 0.075,
+    propagationMinimum: 0.24,
+    propagationEnergyDelta: 0.18,
+    lifetimeMinimum: 1.65,
+    lifetimeSustainDelta: 1.25,
+    width: 0.10,
+    displacementGain: 0.88,
+  }),
+  influence: Object.freeze({
+    viewportY: 0.5,
+    baseRadius: 0.16,
+    radiusMinimumDelta: 0.03,
+    radiusSpanDelta: 0.30,
+    strengthMinimumActive: 0.12,
+    strengthMaximum: 1.45,
+    activityThreshold: 0.005,
+    maximumVelocity: 1.6,
+  }),
+  interactions: Object.freeze({
+    motionWarp: Object.freeze({ enabled: true, gain: 0.72, radius: 0.24 }),
+    activeDeformation: Object.freeze({ enabled: false }),
+    coordinateShear: Object.freeze({ enabled: false }),
+    rippleDisplacement: Object.freeze({ enabled: true, gain: 0.9 }),
+    membraneResponse: Object.freeze({
+      enabled: true,
+      radialGain: 0.58,
+      tangentialGain: 0.28,
+      radius: 0.50,
+      waveEnabled: false,
+      waveGain: 0,
+    }),
+  }),
+  parameterInterval: 1 / 30,
+  parameterMappings: Object.freeze({
+    flowSpeed: Object.freeze({ feature: 'energy01', delta: 0.70 }),
+    turbulence: Object.freeze({ feature: 'energy01', delta: 0.55 }),
+    fineDetail: Object.freeze({ feature: 'density01', delta: 0.45 }),
+    warp: Object.freeze({ feature: 'span01', delta: 0.45 }),
+    filmBase: Object.freeze({ feature: 'register01', centeredDelta: 180 }),
+    lightMotion: Object.freeze({ feature: 'pitchMotion01', delta: 0.50 }),
+  }),
+});
+
+export const MAPPED_PARAMETER_NAMES = Object.freeze(
+  Object.keys(MUSICAL_FIELD_V1.parameterMappings),
+);

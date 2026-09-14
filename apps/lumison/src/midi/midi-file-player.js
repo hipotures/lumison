@@ -12,9 +12,11 @@ export class MidiFilePlayer {
     this.performance = createPerformanceState();
     this.performanceTimeline = null;
     this.listeners = new Set();
+    this.eventListeners = new Set();
 
     source.subscribe((event) => {
       reducePerformanceState(this.performance, event);
+      for (const listener of this.eventListeners) listener(event, this.performance);
       this.notify('event');
     });
     source.subscribeTransport((change) => {
@@ -38,6 +40,13 @@ export class MidiFilePlayer {
   subscribe(listener) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Observe source-neutral canonical events dispatched by live transport playback. */
+  subscribeEvents(listener) {
+    if (typeof listener !== 'function') throw new TypeError('MIDI event listener must be a function');
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
   }
 
   notify(reason) {
@@ -64,4 +73,5 @@ export class MidiFilePlayer {
 
   get metadata() { return this.source.metadata; }
   get transport() { return this.source.transport; }
+  get canonicalEvents() { return this.performanceTimeline?.events ?? []; }
 }

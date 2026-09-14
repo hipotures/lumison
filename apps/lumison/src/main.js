@@ -2,6 +2,14 @@ import { createState, TflEngine } from '../../../packages/tfl-engine/src/index.j
 import { createBrowserRenderHost } from '../../../packages/tfl-engine/src/browser.js';
 import { MidiFilePlayer } from './midi/midi-file-player.js';
 import { WebMidiSource } from './midi/web-midi-source.js';
+import {
+  createMusicalFeatureState,
+  rebuildMusicalFeatureState,
+  reduceMusicalFeatureState,
+  updateMusicalFeatureState,
+} from './music/musical-features.js';
+import { MAPPED_PARAMETER_NAMES } from './visual/mapping-profiles.js';
+import { MusicalVisualMapper } from './visual/musical-visual-mapper.js';
 
 const element = (id) => document.getElementById(id);
 const bootMessage = (message) => { element('bootMsg').textContent = message; };
@@ -26,11 +34,22 @@ function pedalText(pedal) {
   return pedal.rawValue > 0 ? `${pedal.rawValue} / ${pedal.on ? 'on' : 'off'}` : 'off';
 }
 
-function createMidiUI() {
+function createMidiUI({ engine, baseline, canvas }) {
   const player = new MidiFilePlayer();
   const liveSource = new WebMidiSource();
+  let features = createMusicalFeatureState();
+  const mapper = new MusicalVisualMapper({ engine, baseline });
+  let mode = 'file';
   let scrubbing = false;
   let dirty = true;
+  let mappingDirty = true;
+
+  const canvasAspect = () => {
+    const width = canvas.clientWidth || window.innerWidth;
+    const height = canvas.clientHeight || window.innerHeight;
+    return height > 0 ? width / height : 1;
+  };
+  mapper.setAspect(canvasAspect());
 
   for (let channel = 1; channel <= 16; channel += 1) {
     element('liveChannel').append(new Option(String(channel), String(channel)));
@@ -69,6 +88,17 @@ function createMidiUI() {
     element('soft').textContent = pedalText(state.soft);
     element('sostenuto').textContent = pedalText(state.sostenuto);
 
+    element('featureEnergy').textContent = features.energy01.toFixed(2);
+    element('featureDensity').textContent = features.density01.toFixed(2);
+    element('featureAttacks').textContent = features.attackRate1s.toFixed(1);
+    element('featureVelocity').textContent = features.attackVelocity1s.toFixed(2);
+    element('featurePolyphony').textContent = String(features.soundingPolyphony);
+    element('featureRegister').textContent = features.register01 === null
+      ? '—' : features.register01.toFixed(2);
+    element('featureSpan').textContent = features.span01.toFixed(2);
+    element('featureMotion').textContent = features.pitchMotion01.toFixed(2);
+    element('featureSustain').textContent = features.sustain01.toFixed(2);
+
     element('trackCount').textContent = metadata ? String(metadata.tracks) : '—';
     const names = metadata?.trackNames.join(', ') || '—';
     element('trackNames').textContent = names;
@@ -83,7 +113,37 @@ function createMidiUI() {
     dirty = false;
   }
 
-  player.subscribe(() => { dirty = true; });
+  player.subscribeEvents((event) => {
+    reduceMusicalFeatureState(features, event, player.performance);
+    if (mode === 'file') mapper.emitEvent(event, features);
+    mappingDirty = true;
+  });
+  player.subscribe((currentPlayer, reason) => {
+    if (reason === 'seek') {
+      features = rebuildMusicalFeatureState(
+        currentPlayer.canonicalEvents,
+        currentPlayer.performance,
+        currentPlayer.transport.position,
+      );
+      if (mode === 'file') mapper.seek(features);
+      mappingDirty = false;
+    } else if (reason === 'stop' || reason === 'load') {
+      features = createMusicalFeatureState({
+        position: currentPlayer.transport.position,
+        tempoBpm: currentPlayer.performance.currentTempo,
+      });
+      mapper.stop();
+      mappingDirty = false;
+    } else if (reason === 'loop') {
+      features = createMusicalFeatureState({
+        position: currentPlayer.transport.position,
+        tempoBpm: currentPlayer.performance.currentTempo,
+      });
+      if (mode === 'file') mapper.loop(features);
+      mappingDirty = false;
+    }
+    dirty = true;
+  });
 
   async function loadFile(file) {
     if (!file) return;
@@ -114,6 +174,16 @@ function createMidiUI() {
   element('stop').addEventListener('click', () => player.stop());
   element('speed').addEventListener('change', (event) => player.setRate(Number(event.target.value)));
   element('loop').addEventListener('change', (event) => player.setLoop(event.target.checked));
+  element('mappingEnabled').addEventListener('change', (event) => {
+    mapper.setEnabled(mode === 'file' && event.target.checked);
+    if (mapper.enabled) mapper.seek(features);
+    dirty = true;
+  });
+  element('sensitivity').addEventListener('input', (event) => {
+    const sensitivity = mapper.setSensitivity(Number(event.target.value), features);
+    element('sensitivityValue').textContent = sensitivity.toFixed(2);
+    mappingDirty = false;
+  });
   element('timeline').addEventListener('pointerdown', () => { scrubbing = true; });
   element('timeline').addEventListener('input', (event) => {
     player.seek(Number(event.target.value));
@@ -138,15 +208,22 @@ function createMidiUI() {
   }
   drop.addEventListener('drop', (event) => loadFile(event.dataTransfer?.files?.[0]));
 
-  function setMode(mode) {
-    const live = mode === 'live';
-    if (live) player.pause();
+  function setMode(nextMode) {
+    if (nextMode === mode) return;
+    const live = nextMode === 'live';
+    if (live) player.stop();
+    mapper.setEnabled(!live && element('mappingEnabled').checked);
+    if (!live && mapper.enabled) mapper.seek(features);
+    element('mappingEnabled').disabled = live;
+    element('sensitivity').disabled = live;
     element('fileMode').hidden = live;
     element('liveMode').hidden = !live;
     element('fileTab').classList.toggle('active', !live);
     element('liveTab').classList.toggle('active', live);
     element('fileTab').setAttribute('aria-selected', String(!live));
     element('liveTab').setAttribute('aria-selected', String(live));
+    mode = live ? 'live' : 'file';
+    dirty = true;
   }
   element('fileTab').addEventListener('click', () => setMode('file'));
   element('liveTab').addEventListener('click', () => setMode('live'));
@@ -155,7 +232,7 @@ function createMidiUI() {
   });
 
   window.addEventListener('keydown', (event) => {
-    if (event.code !== 'Space' || event.repeat) return;
+    if (mode !== 'file' || event.code !== 'Space' || event.repeat) return;
     if (['INPUT', 'SELECT', 'BUTTON'].includes(event.target?.tagName)) return;
     event.preventDefault();
     if (player.transport.playing) player.pause();
@@ -166,7 +243,21 @@ function createMidiUI() {
   return {
     update() {
       player.update();
+      const position = player.transport.position;
+      if (position !== features.position) {
+        updateMusicalFeatureState(features, player.performance, position);
+        mappingDirty = true;
+      }
+      mapper.setAspect(canvasAspect());
+      if (mode === 'file' && mappingDirty) {
+        mapper.update(features);
+        mappingDirty = false;
+      }
       if (dirty) render();
+    },
+    resize() {
+      mapper.setAspect(canvasAspect());
+      mappingDirty = true;
     },
   };
 }
@@ -187,12 +278,22 @@ async function boot() {
       element('renderStatus').textContent = fallback ? reason : `Visual renderer: ${backend}`;
     },
   });
-  engine.applyPreset('Soap Film', { transition: 'immediate' });
-  const midi = createMidiUI();
+  const preset = engine.applyPreset('Soap Film', { transition: 'immediate' });
+  const baseline = Object.fromEntries(MAPPED_PARAMETER_NAMES.map((name) => [
+    name,
+    preset.accepted.find((entry) => entry.name === name)?.value,
+  ]));
+  const midi = createMidiUI({ engine, baseline, canvas });
 
-  const observer = new ResizeObserver(() => engine.resize());
+  const observer = new ResizeObserver(() => {
+    engine.resize();
+    midi.resize();
+  });
   observer.observe(document.body);
-  window.addEventListener('orientationchange', () => engine.resize());
+  window.addEventListener('orientationchange', () => {
+    engine.resize();
+    midi.resize();
+  });
 
   bootMessage('Initializing TFL renderer…');
   await engine.initialize({ onProgress: bootMessage });

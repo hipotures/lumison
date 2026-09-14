@@ -130,3 +130,37 @@ test('file player rebuilds state on seek and clears it on stop and loop', () => 
   assert.equal(player.performance.soundingPolyphony, 0);
   assert.equal(player.performance.sustain.on, false);
 });
+
+test('file player exposes canonical live transport events without replaying seek history', () => {
+  let time = 0;
+  const canonical = [
+    { type: 'note-on', channel: 1, note: 60, velocity: 0.8, timestamp: 0.1 },
+    { type: 'note-off', channel: 1, note: 60, velocity: 0.2, timestamp: 0.2 },
+  ];
+  const source = new MidiFileSource({
+    now: () => time,
+    parse: () => ({
+      events: canonical,
+      metadata: {
+        filename: 'events.mid', duration: 1, tracks: 1,
+        trackNames: [], channels: [1], eventCount: canonical.length,
+      },
+    }),
+  });
+  const player = new MidiFilePlayer({ source });
+  const seen = [];
+  player.subscribeEvents((midiEvent, performance) => {
+    seen.push({ type: midiEvent.type, sounding: performance.soundingPolyphony });
+  });
+  player.load(new ArrayBuffer(0), 'events.mid');
+  player.seek(0.15);
+  assert.deepEqual(seen, []);
+  player.stop();
+  player.play();
+  time = 0.25;
+  player.update();
+  assert.deepEqual(seen, [
+    { type: 'note-on', sounding: 1 },
+    { type: 'note-off', sounding: 0 },
+  ]);
+});

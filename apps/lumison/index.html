@@ -119,6 +119,32 @@
       </section>
     </div>
 
+    <section aria-labelledby="mappingHeading">
+      <h2 id="mappingHeading">Visual Mapping</h2>
+      <div class="mapping-controls">
+        <label class="check"><input id="mappingEnabled" type="checkbox" checked> Enabled</label>
+        <span class="profile-name">Profile&nbsp;&nbsp; Musical Field v1</span>
+        <label for="sensitivity">Sensitivity</label>
+        <input id="sensitivity" type="range" min="0" max="2" step="0.01" value="1">
+        <output id="sensitivityValue" for="sensitivity">1.00</output>
+      </div>
+    </section>
+
+    <section aria-labelledby="musicFeaturesHeading">
+      <h2 id="musicFeaturesHeading">Music Features</h2>
+      <dl class="monitor">
+        <dt>energy</dt><dd id="featureEnergy">0.00</dd>
+        <dt>density</dt><dd id="featureDensity">0.00</dd>
+        <dt>attacks/s</dt><dd id="featureAttacks">0.0</dd>
+        <dt>velocity</dt><dd id="featureVelocity">0.00</dd>
+        <dt>polyphony</dt><dd id="featurePolyphony">0</dd>
+        <dt>register</dt><dd id="featureRegister">—</dd>
+        <dt>span</dt><dd id="featureSpan">0.00</dd>
+        <dt>motion</dt><dd id="featureMotion">0.00</dd>
+        <dt>sustain</dt><dd id="featureSustain">0.00</dd>
+      </dl>
+    </section>
+
     <footer id="renderStatus">Renderer starting…</footer>
   </aside>
 
