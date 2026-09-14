@@ -26,13 +26,14 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
     lastFallbackReason: '',
     backendChange: null,
     switching: false,
+    msaa: 0,
     lastFrame: null,
 
     async switchBackend(requested, { msaa, quality }) {
       const backend = normalizeRequestedBackend(requested);
       if (backend === 'auto') throw new Error('Choose WebGPU or WebGL2');
       if (host.switching) throw new Error('Backend switch already in progress');
-      if (backend === host.backend && host.hasGpu()) return canvas;
+      if (backend === host.backend && msaa === host.msaa && host.hasGpu()) return canvas;
       host.switching = true;
       let renderer;
       let stage;
@@ -65,6 +66,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
         host.renderer = renderer;
         host.stage = stage;
         host.backend = backend;
+        host.msaa = msaa;
         host.fallback = null;
         host.lastFallbackReason = '';
         fallbackCanvas.hidden = true;
@@ -84,6 +86,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
     async initialize({ msaa, quality, onProgress = () => {} }) {
       try {
         host.renderer = await createRenderer(canvas, { msaa, onProgress });
+        host.msaa = msaa;
         host.backend = backendName(host.renderer);
         host.stage = createFilmStage(host.renderer, quality);
         host.fallback = null;

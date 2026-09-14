@@ -378,10 +378,25 @@ async function boot() {
     quality: (quality) => {
       if (engine.setQuality(quality)) { app.ui?.sync(); persistSoon(); }
     },
-    msaa: (value) => {
-      if (state.msaa === value || !engine.setMsaa(value)) return;
-      saveLabState(engine, labState);
-      location.reload();
+    msaa: async (value) => {
+      if (state.msaa === value || ![0, 2, 4].includes(value)) return;
+      app.ui?.sync();
+      try {
+        if (renderHost.hasGpu()) {
+          canvas = await renderHost.switchBackend(renderHost.backend, {
+            msaa: value, quality: state.quality,
+          });
+          app.pointer.rebind(canvas, [fallbackCanvas]);
+          bindPointerEvents();
+        }
+        engine.setMsaa(value);
+        persistSoon();
+        updateDiagnostics();
+      } catch (error) {
+        toast(`MSAA change failed: ${error?.message ?? error}`);
+      } finally {
+        app.ui?.sync();
+      }
     },
     adaptive: (enabled) => { engine.setAdaptive(enabled); app.ui?.sync(); persistSoon(); },
     targetFps: (value) => {

@@ -31,3 +31,32 @@ test('invalid, automatic and concurrent switch requests preserve the active host
   assert.equal(host.canvas, canvas);
   assert.equal(host.backendChange, null);
 });
+
+test('MSAA changes rebuild the same backend and failure preserves the active configuration', async () => {
+  let replacements = 0;
+  const canvas = {
+    cloneNode() {
+      replacements++;
+      throw new Error('Replacement unavailable');
+    },
+  };
+  const host = createBrowserRenderHost({ canvas, fallbackCanvas: {} });
+  const renderer = {};
+  const stage = {};
+  Object.assign(host, { backend: 'WebGPU', renderer, stage, msaa: 2 });
+  assert.equal(await host.switchBackend('WebGPU', { msaa: 2, quality: 'High' }), canvas);
+  assert.equal(replacements, 0);
+  for (const msaa of [0, 4]) {
+    await assert.rejects(
+      host.switchBackend('WebGPU', { msaa, quality: 'High' }),
+      /Replacement unavailable/,
+    );
+    assert.equal(host.msaa, 2);
+    assert.equal(host.renderer, renderer);
+    assert.equal(host.stage, stage);
+    assert.equal(host.canvas, canvas);
+    assert.equal(host.backend, 'WebGPU');
+    assert.equal(host.switching, false);
+  }
+  assert.equal(replacements, 2);
+});
