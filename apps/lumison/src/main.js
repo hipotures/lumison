@@ -21,6 +21,7 @@ import {
 } from './music/musical-features.js';
 import { MAPPED_PARAMETER_NAMES } from './visual/mapping-profiles.js';
 import { MusicalVisualMapper } from './visual/musical-visual-mapper.js';
+import { createVisualTuningUI } from './visual/visual-tuning-ui.js';
 
 const element = (id) => document.getElementById(id);
 const bootMessage = (message) => { element('bootMsg').textContent = message; };
@@ -62,6 +63,10 @@ function createMidiUI({ engine, baseline, canvas }) {
   let scrubbing = false;
   let dirty = true;
   let mappingDirty = true;
+  const tuningUI = createVisualTuningUI({
+    root: element('visualMappingTuning'), mapper,
+    getFeatures: () => features, isActive: () => mode === 'file',
+  });
 
   const canvasAspect = () => {
     const width = canvas.clientWidth || window.innerWidth;
@@ -75,6 +80,7 @@ function createMidiUI({ engine, baseline, canvas }) {
   }
 
   function render() {
+    tuningUI.renderFeatures(features);
     const state = player.performance;
     const transport = player.transport;
     const metadata = player.metadata;
@@ -341,11 +347,13 @@ function createMidiUI({ engine, baseline, canvas }) {
   element('mappingEnabled').addEventListener('change', (event) => {
     mapper.setEnabled(mode === 'file' && event.target.checked);
     if (mapper.enabled) mapper.seek(features);
+    tuningUI.sync();
     dirty = true;
   });
   element('sensitivity').addEventListener('input', (event) => {
     const sensitivity = mapper.setSensitivity(Number(event.target.value), features);
     element('sensitivityValue').textContent = sensitivity.toFixed(2);
+    tuningUI.sync();
     mappingDirty = false;
   });
   element('timeline').addEventListener('pointerdown', () => { scrubbing = true; });

@@ -4,6 +4,7 @@ import {
   normalizedViewportToSurface,
 } from '../../../../packages/tfl-engine/src/index.js';
 import { MUSICAL_FIELD_V1 } from './mapping-profiles.js';
+import { defaultTuning, validateTuning } from './visual-tuning.js';
 
 const clamp01 = (value) => Math.min(1, Math.max(0, Number(value) || 0));
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
@@ -43,12 +44,13 @@ export class MusicalVisualMapper {
     engine,
     baseline,
     profile = MUSICAL_FIELD_V1,
-    sensitivity = 1,
-    enabled = true,
+    sensitivity,
+    enabled,
     aspect = 1,
   }) {
     if (!engine) throw new TypeError('MusicalVisualMapper requires a TFL engine');
     this.engine = engine;
+    this.tuning = defaultTuning();
     this.profile = profile;
     this.baseline = Object.fromEntries(
       Object.keys(profile.parameterMappings).map((name) => [name, baseline[name]]),
@@ -56,19 +58,52 @@ export class MusicalVisualMapper {
     if (Object.values(this.baseline).some((value) => !Number.isFinite(value))) {
       throw new TypeError('MusicalVisualMapper requires a complete numeric baseline');
     }
-    this.sensitivity = clamp(Number(sensitivity) || 0, 0, 2);
+    this.sensitivity = clamp(Number(sensitivity ?? this.tuning.master.sensitivity) || 0, 0, 2);
+    this.tuning.master.sensitivity = this.sensitivity;
+    this.tuning.master.enabled = enabled ?? this.tuning.master.enabled;
     this.aspect = finiteAspect(aspect);
     this.enabled = false;
+    this.lastFeatures = null;
+    this.smoothedFeatures = null;
     this.lastSurfacePosition = { x: 0, y: 0 };
+    this.lastRegisterPosition = { x: 0, y: 0 };
     this.lastPositionTime = null;
     this.hasPosition = false;
     this.lastParameterPosition = -Infinity;
     this.lastParameterValues = null;
-    if (enabled) this.setEnabled(true);
+    if (this.tuning.master.enabled) this.setEnabled(true);
   }
 
   setAspect(aspect) {
     this.aspect = finiteAspect(aspect);
+  }
+
+  applyTuning(configuration, features = this.lastFeatures) {
+    const next = validateTuning(configuration); // Validate completely before any mutation.
+    const previous = this.tuning;
+    this.tuning = next;
+    this.profile = {
+      ...MUSICAL_FIELD_V1,
+      pitch: { minimum: next.transient.pitchMinimum, maximum: next.transient.pitchMaximum },
+      transient: next.transient,
+      influence: next.influence,
+      interactions: next.interactions,
+      parameterInterval: next.temporal.parameterInterval,
+      parameterMappings: Object.fromEntries(Object.entries(MUSICAL_FIELD_V1.parameterMappings)
+        .map(([key, value]) => [key, { ...value, ...next.parameterMappings[key] }])),
+    };
+    this.sensitivity = next.master.sensitivity;
+    this.setEnabled(next.master.enabled);
+    this.configureProfile(this.enabled);
+    if (JSON.stringify(previous.transient) !== JSON.stringify(next.transient)
+      || !next.master.enabled || this.sensitivity === 0) this.engine.clearTransientEvents();
+    const resetVelocity = ['enabled', 'registerPosition', 'registerVelocity', 'viewportY']
+      .some((key) => previous.influence[key] !== next.influence[key]);
+    if (resetVelocity) this.resetInfluenceMotion();
+    if (JSON.stringify(previous.temporal) !== JSON.stringify(next.temporal)) this.smoothedFeatures = null;
+    if (this.enabled && features) this.update(features, { forceParameters: true, resetVelocity });
+    if (!next.influence.enabled || this.sensitivity === 0) this.engine.clearSpatialInfluence();
+    return structuredClone(next);
   }
 
   configureProfile(active) {
@@ -89,6 +124,7 @@ export class MusicalVisualMapper {
 
   setEnabled(enabled) {
     const active = enabled === true;
+    this.tuning.master.enabled = active;
     if (active === this.enabled) return this.enabled;
     this.enabled = active;
     this.engine.clearTransientEvents();
@@ -101,6 +137,7 @@ export class MusicalVisualMapper {
 
   setSensitivity(value, features = null) {
     this.sensitivity = clamp(Number(value) || 0, 0, 2);
+    this.tuning.master.sensitivity = this.sensitivity;
     if (this.sensitivity === 0) {
       this.engine.clearTransientEvents();
       this.engine.clearSpatialInfluence();
@@ -111,15 +148,18 @@ export class MusicalVisualMapper {
   }
 
   emitEvent(event, features) {
-    if (!this.enabled || this.sensitivity === 0 || event?.type !== 'note-on') return false;
+    if (!this.enabled || !this.tuning.transient.enabled || this.sensitivity === 0 || event?.type !== 'note-on') return false;
     const normalized = mapNoteToNormalizedPosition(event, this.profile);
+    if (!this.tuning.transient.pitchPosition) normalized.x = 0.5;
+    if (!this.tuning.transient.velocityPosition) normalized.y = 0.5;
     const origin = normalizedViewportToSurface(normalized.x, normalized.y, this.aspect);
     const pitch01 = clamp01(
       (event.note - this.profile.pitch.minimum)
         / (this.profile.pitch.maximum - this.profile.pitch.minimum),
     );
     const transient = this.profile.transient;
-    const velocityResponse = clamp01(event.velocity) ** transient.amplitudeExponent;
+    const velocityResponse = this.tuning.transient.velocityAmplitude
+      ? clamp01(event.velocity) ** transient.amplitudeExponent : 0;
     const amplitude = clamp(
       (transient.amplitudeMinimum
         + velocityResponse * (transient.amplitudeMaximum - transient.amplitudeMinimum))
@@ -131,11 +171,12 @@ export class MusicalVisualMapper {
       origin,
       amplitude,
       wavelength: transient.wavelengthLowPitch
-        + (transient.wavelengthHighPitch - transient.wavelengthLowPitch) * pitch01,
+        + (transient.wavelengthHighPitch - transient.wavelengthLowPitch)
+          * (this.tuning.transient.pitchWavelength ? pitch01 : 0),
       propagationSpeed: transient.propagationMinimum
-        + transient.propagationEnergyDelta * clamp01(features?.energy01),
+        + transient.propagationEnergyDelta * (this.tuning.transient.energyPropagation ? clamp01(features?.energy01) : 0),
       lifetime: transient.lifetimeMinimum
-        + transient.lifetimeSustainDelta * clamp01(features?.sustain01),
+        + transient.lifetimeSustainDelta * (this.tuning.transient.sustainLifetime ? clamp01(features?.sustain01) : 0),
       width: transient.width,
       displacementGain: transient.displacementGain,
     });
@@ -145,6 +186,10 @@ export class MusicalVisualMapper {
   mappedParameters(features) {
     const changes = {};
     for (const [name, mapping] of Object.entries(this.profile.parameterMappings)) {
+      if (!this.tuning.parameterMappings[name].enabled) {
+        changes[name] = this.baseline[name];
+        continue;
+      }
       const rawFeature = features?.[mapping.feature];
       const feature = rawFeature === null ? 0.5 : clamp01(rawFeature);
       const value = Object.hasOwn(mapping, 'centeredDelta')
@@ -163,7 +208,7 @@ export class MusicalVisualMapper {
       || Object.keys(changes).some((name) => changes[name] !== this.lastParameterValues[name])) {
       this.engine.setParameters(changes, {
         source: 'musical-field-v1',
-        transition: 'smooth',
+        transition: this.tuning.temporal.parameterSmoothing ? 'smooth' : 'immediate',
         markPreset: false,
       });
       this.lastParameterValues = changes;
@@ -172,39 +217,50 @@ export class MusicalVisualMapper {
   }
 
   applyInfluence(features, resetVelocity = false) {
+    if (!this.tuning.influence.enabled) {
+      this.engine.clearSpatialInfluence();
+      return;
+    }
     const field = this.profile.influence;
+    const controls = this.tuning.influence;
     const hasRegister = features?.register01 !== null
       && Number.isFinite(features?.register01);
     let position = this.lastSurfacePosition;
-    if (hasRegister) {
+    if (hasRegister || !controls.registerPosition) {
       position = normalizedViewportToSurface(
-        clamp01(features.register01),
+        controls.registerPosition ? clamp01(features.register01) : 0.5,
         field.viewportY,
         this.aspect,
       );
     }
 
     let velocity = { x: 0, y: 0 };
-    if (!resetVelocity && hasRegister && this.hasPosition
-      && (position.x !== this.lastSurfacePosition.x || position.y !== this.lastSurfacePosition.y)) {
+    // Velocity follows register independently even when the visible field is centered.
+    const registerPosition = hasRegister
+      ? normalizedViewportToSurface(clamp01(features.register01), field.viewportY, this.aspect)
+      : this.lastRegisterPosition;
+    if (controls.registerVelocity && !resetVelocity && hasRegister && this.hasPosition
+      && (registerPosition.x !== this.lastRegisterPosition.x || registerPosition.y !== this.lastRegisterPosition.y)) {
       velocity = boundedVelocity(
-        this.lastSurfacePosition,
-        position,
+        this.lastRegisterPosition,
+        registerPosition,
         features.position - this.lastPositionTime,
         field.maximumVelocity,
       );
     }
-    if (hasRegister
+    if ((hasRegister || !controls.registerPosition)
       && (!this.hasPosition
-        || position.x !== this.lastSurfacePosition.x
-        || position.y !== this.lastSurfacePosition.y)) {
+        || registerPosition.x !== this.lastRegisterPosition.x
+        || registerPosition.y !== this.lastRegisterPosition.y)) {
       this.lastSurfacePosition = position;
+      this.lastRegisterPosition = registerPosition;
       this.lastPositionTime = features.position;
       this.hasPosition = true;
     }
 
-    const meaningful = (features?.soundingPolyphony ?? 0) > 0
-      || (features?.density01 ?? 0) > field.activityThreshold;
+    const meaningful = !controls.activityGate
+      || (controls.soundingActivity && (features?.soundingPolyphony ?? 0) > 0)
+      || (controls.densityActivity && (features?.density01 ?? 0) > field.activityThreshold);
     const engaged = meaningful && this.sensitivity > 0;
     this.engine.setSpatialInfluence({
       id: 'musical-field-v1',
@@ -213,12 +269,12 @@ export class MusicalVisualMapper {
         ? { x: velocity.x * this.sensitivity, y: velocity.y * this.sensitivity }
         : { x: 0, y: 0 },
       radius: field.baseRadius
-        + (field.radiusMinimumDelta + field.radiusSpanDelta * clamp01(features?.span01))
+        + (field.radiusMinimumDelta + field.radiusSpanDelta * (controls.spanRadius ? clamp01(features?.span01) : 0))
           * this.sensitivity,
       strength: engaged
         ? (field.strengthMinimumActive
           + (field.strengthMaximum - field.strengthMinimumActive)
-            * clamp01(features?.energy01)) * this.sensitivity
+            * (controls.energyStrength ? clamp01(features?.energy01) : 0)) * this.sensitivity
         : 0,
       engaged,
       positionValid: this.hasPosition,
@@ -226,16 +282,31 @@ export class MusicalVisualMapper {
   }
 
   update(features, { forceParameters = false, resetVelocity = false } = {}) {
+    this.lastFeatures = features;
     if (!this.enabled) return false;
+    const temporal = this.tuning.temporal;
+    if (temporal.enabled && temporal.responseSeconds > 0) {
+      const previous = this.smoothedFeatures;
+      const dt = features.position - (previous?.position ?? features.position);
+      const amount = previous && dt >= 0 && !resetVelocity ? 1 - Math.exp(-dt / temporal.responseSeconds) : 1;
+      const smooth = { ...features };
+      for (const key of ['energy01', 'density01', 'register01', 'span01', 'pitchMotion01']) {
+        if (Number.isFinite(features[key]) && Number.isFinite(previous?.[key])) smooth[key] = previous[key] + (features[key] - previous[key]) * amount;
+      }
+      this.smoothedFeatures = smooth;
+      features = smooth;
+    } else this.smoothedFeatures = null;
     this.applyInfluence(features, resetVelocity);
     this.applyParameters(features, forceParameters);
     return true;
   }
 
   resetInfluenceMotion() {
+    this.smoothedFeatures = null;
     this.lastPositionTime = null;
     this.hasPosition = false;
     this.lastSurfacePosition = { x: 0, y: 0 };
+    this.lastRegisterPosition = { x: 0, y: 0 };
   }
 
   restoreBaseline() {
@@ -243,7 +314,7 @@ export class MusicalVisualMapper {
     this.lastParameterValues = { ...this.baseline };
     this.engine.setParameters({ ...this.baseline }, {
       source: 'musical-field-v1-reset',
-      transition: 'smooth',
+      transition: this.tuning.temporal.parameterSmoothing ? 'smooth' : 'immediate',
       markPreset: false,
     });
   }

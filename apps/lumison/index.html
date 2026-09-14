@@ -159,12 +159,18 @@
     <section aria-labelledby="mappingHeading">
       <h2 id="mappingHeading">Visual Mapping</h2>
       <div class="mapping-controls">
-        <label class="check"><input id="mappingEnabled" type="checkbox" checked> Enabled</label>
+        <label class="check"><input id="mappingEnabled" type="checkbox"> Enabled</label>
         <span class="profile-name">Profile&nbsp;&nbsp; Musical Field v1</span>
         <label for="sensitivity">Sensitivity</label>
-        <input id="sensitivity" type="range" min="0" max="2" step="0.01" value="1">
-        <output id="sensitivityValue" for="sensitivity">1.00</output>
+        <input id="sensitivity" type="range">
+        <output id="sensitivityValue" for="sensitivity"></output>
       </div>
+    </section>
+
+    <section>
+      <details id="visualMappingTuning" class="visual-tuning">
+        <summary>Visual Mapping Tuning</summary>
+      </details>
     </section>
 
     <section aria-labelledby="musicFeaturesHeading">
