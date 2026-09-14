@@ -74,7 +74,7 @@ export function buildUI(root, state, labState, A) {
     backendSelect.value = backend;
     backendStatus.textContent = ['WebGPU', 'WebGL2'].includes(backend) ? '' : backend;
     backendSelect.options[0].disabled = !A.webgpuAvailable();
-    backendSelect.disabled = switchingBackend || backend === 'starting';
+    backendSelect.disabled = switchingBackend || A.benchmarkRunning() || backend === 'starting';
   }
   backendSelect.addEventListener('change', async () => {
     const requested = backendSelect.value;
@@ -94,7 +94,19 @@ export function buildUI(root, state, labState, A) {
   graph.setAttribute('aria-label', 'FPS history: waiting for samples');
   const graphStats = el('div', 'fps-history-stats', 'FPS · last 120 seconds');
   const diagText = el('div', '', 'starting…');
-  diag.append(graph, graphStats, diagText);
+  const benchmark = el('section', 'benchmark');
+  benchmark.append(el('div', 'benchmark-title', 'Benchmark'));
+  const benchmarkActions = el('div', 'btn-row');
+  const runBenchmarkButton = el('button', 'btn small', 'Run 30s');
+  const stopBenchmarkButton = el('button', 'btn small', 'Stop');
+  stopBenchmarkButton.disabled = true;
+  runBenchmarkButton.addEventListener('click', () => A.runBenchmark());
+  stopBenchmarkButton.addEventListener('click', () => A.stopBenchmark());
+  benchmarkActions.append(runBenchmarkButton, stopBenchmarkButton);
+  const benchmarkReadout = el('div', 'benchmark-readout', '2s warm-up · 30s measured');
+  const comparison = el('div', 'benchmark-comparison');
+  benchmark.append(benchmarkActions, benchmarkReadout, comparison);
+  diag.append(graph, graphStats, benchmark, diagText);
   syncBackend();
   footer.append(toggleRow('Diagnostics', false, (enabled) => {
     diag.hidden = !enabled;
@@ -510,6 +522,47 @@ export function buildUI(root, state, labState, A) {
   function setDiag(html) {
     diagText.innerHTML = html;
     syncBackend();
+    runBenchmarkButton.disabled = switchingBackend || A.benchmarkRunning()
+      || !['WebGPU', 'WebGL2'].includes(A.backend());
+  }
+
+  function setBenchmark(result, results) {
+    root.inert = result.running === true;
+    runBenchmarkButton.disabled = result.running === true;
+    stopBenchmarkButton.disabled = result.running !== true;
+    syncBackend();
+    const lines = [
+      `backend     ${result.backend}`,
+      `resolution  ${result.width}×${result.height} · DPR ${result.dpr}`,
+      `quality     ${result.quality}`,
+      `MSAA        ${result.msaa ? `${result.msaa}x` : 'Off'}`,
+      `scale       ${result.scale.toFixed(2)} · ${result.view}`,
+      result.running
+        ? `${result.phase === 'warm-up' ? 'warm-up' : 'progress'}    ${(result.elapsedMs / 1000).toFixed(1)} / ${(result.durationMs / 1000).toFixed(1)} s`
+        : result.phase,
+    ];
+    if (result.phase === 'complete') lines.push(
+      `measured    ${(result.elapsedMs / 1000).toFixed(2)} s`,
+      `throughput  ${result.fps.toFixed(1)} fps`,
+      `avg         ${result.averageMs.toFixed(2)} ms`,
+      `p50         ${result.p50Ms.toFixed(2)} ms`,
+      `p95         ${result.p95Ms.toFixed(2)} ms`,
+      `frames      ${result.frames}`,
+      'Timings: completed batch / frame',
+    );
+    if (result.error) lines.push(result.error);
+    benchmarkReadout.textContent = lines.join('\n');
+    if (results) comparison.textContent = results.map((item) =>
+      `${item.backend}  ${item.fps.toFixed(1)} fps  p50 ${item.p50Ms.toFixed(2)} ms  p95 ${item.p95Ms.toFixed(2)} ms\n` +
+      `${item.width}×${item.height} · ${item.quality} · MSAA ${item.msaa} · scale ${item.scale.toFixed(2)} · ${item.view}`,
+    ).join('\n');
+  }
+
+  function finishBenchmark() {
+    root.inert = false;
+    stopBenchmarkButton.disabled = true;
+    runBenchmarkButton.disabled = false;
+    syncBackend();
   }
 
   function setFpsHistory(samples) {
@@ -530,7 +583,7 @@ export function buildUI(root, state, labState, A) {
   }
 
   sync();
-  return { sync, setDiag, setFpsHistory };
+  return { sync, setDiag, setFpsHistory, setBenchmark, finishBenchmark };
 }
 
 function el(tag, cls, text) {

@@ -11,6 +11,7 @@ import {
 import { createBrowserRenderHost } from '../../../packages/tfl-engine/src/browser.js';
 import { isWebGPUAvailable } from '../../../packages/tfl-engine/src/renderer.js';
 import { createFpsHistory } from './fps-history.js';
+import { createBenchmarkResults, runBenchmark } from './benchmark.js';
 import { createPointerAdapter } from './input.js';
 import { createSpatialEventTriggerPolicy } from './ripple-trigger.js';
 import {
@@ -98,6 +99,8 @@ async function boot() {
     membraneTriggers: null,
   };
   const fpsHistory = createFpsHistory();
+  const benchmarkResults = createBenchmarkResults();
+  let benchmarkController = null;
   let webgpuAvailable = false;
 
   const renderHost = createBrowserRenderHost({ canvas, fallbackCanvas });
@@ -235,6 +238,51 @@ async function boot() {
   }
 
   const actions = {
+    benchmarkRunning: () => benchmarkController !== null,
+    stopBenchmark: () => benchmarkController?.abort(),
+    runBenchmark: async () => {
+      if (benchmarkController) return;
+      let session;
+      try { session = renderHost.beginBenchmark(); }
+      catch (error) { toast(error.message); return; }
+      benchmarkController = new AbortController();
+      const started = performance.now();
+      const oldCanvasInert = canvas.inert;
+      const oldFallbackInert = fallbackCanvas.inert;
+      canvas.inert = fallbackCanvas.inert = true;
+      fpsHistory.suspend();
+      app.ui.setBenchmark({ running: true, ...session.configuration, phase: 'warm-up', elapsedMs: 0, durationMs: 2000 });
+      // Suspend both engine.advance and engine.render in the existing loop.
+      // This disables adaptive evaluation without setAdaptive(false), which
+      // would reset the effective scale and change the workload being tested.
+      // Parameters, clocks, pause and the user's adaptive setting stay intact.
+      try {
+        const statistics = await runBenchmark({
+          renderBatch: session.renderBatch,
+          synchronize: session.synchronize,
+          signal: benchmarkController.signal,
+          onProgress: (progress) => app.ui.setBenchmark({ running: true, ...session.configuration, ...progress }),
+        });
+        const result = { ...session.configuration, ...statistics };
+        benchmarkResults.save(result);
+        app.ui.setBenchmark({ ...result, phase: 'complete' }, benchmarkResults.values());
+      } catch (error) {
+        const cancelled = error.name === 'AbortError';
+        app.ui.setBenchmark({ ...session.configuration, phase: cancelled ? 'cancelled' : 'failed', error: cancelled ? '' : error.message });
+        if (!cancelled) toast(`Benchmark failed: ${error.message}`);
+      } finally {
+        session.end();
+        // Keep the adaptive controller's wall-clock window frozen as well.
+        if (engine.adaptive.active) engine.adaptive.windowStart += performance.now() - started;
+        canvas.inert = oldCanvasInert;
+        fallbackCanvas.inert = oldFallbackInert;
+        benchmarkController = null;
+        fpsHistory.suspend();
+        app.lastFrame = performance.now();
+        app.ui.finishBenchmark();
+        updateDiagnostics();
+      }
+    },
     backend: () => renderHost.backend,
     webgpuAvailable: () => webgpuAvailable,
     switchBackend: async (backend) => {
@@ -516,6 +564,10 @@ async function boot() {
   bindPointerEvents();
 
   window.addEventListener('keydown', (event) => {
+    if (benchmarkController) {
+      if (event.key === 'Escape') benchmarkController.abort();
+      return;
+    }
     const target = event.target;
     if (target && ((target.tagName === 'INPUT' && target.type !== 'range') || target.tagName === 'TEXTAREA'
       || target.tagName === 'SELECT' || target.isContentEditable)) return;
@@ -530,10 +582,12 @@ async function boot() {
   });
 
   const observer = new ResizeObserver(() => engine.resize());
+  window.addEventListener('resize', () => benchmarkController?.abort());
   observer.observe(document.body);
   window.addEventListener('orientationchange', () => engine.resize());
   document.addEventListener('fullscreenchange', () => setTimeout(() => engine.resize(), 60));
   document.addEventListener('visibilitychange', () => {
+    if (document.hidden) benchmarkController?.abort();
     app.lastFrame = performance.now();
     fpsHistory.suspend();
   });
@@ -557,7 +611,7 @@ async function boot() {
     let dt = (now - app.lastFrame) / 1000;
     app.lastFrame = now;
     if (!(dt >= 0) || dt > 0.25) dt = 0.025;
-    if (document.hidden) {
+    if (document.hidden || benchmarkController) {
       fpsHistory.suspend();
       requestAnimationFrame(frame);
       return;

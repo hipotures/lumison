@@ -27,11 +27,13 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
     backendChange: null,
     switching: false,
     msaa: 0,
+    benchmarking: false,
     lastFrame: null,
 
     async switchBackend(requested, { msaa, quality }) {
       const backend = normalizeRequestedBackend(requested);
       if (backend === 'auto') throw new Error('Choose WebGPU or WebGL2');
+      if (host.benchmarking) throw new Error('Benchmark is running');
       if (host.switching) throw new Error('Backend switch already in progress');
       if (backend === host.backend && msaa === host.msaa && host.hasGpu()) return canvas;
       host.switching = true;
@@ -110,6 +112,7 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
       normalEvaluation,
       renderScale,
     }) {
+      if (host.benchmarking) return { aspect: logicalAspect() };
       host.lastFrame = {
         state, motionWarp, activeDeformation, coordinateShear,
         rippleDisplacement, membraneResponse, normalEvaluation, renderScale,
@@ -145,7 +148,56 @@ export function createBrowserRenderHost({ canvas, fallbackCanvas }) {
     },
 
     renderCurrentFrame() {
+      if (host.benchmarking) return;
       if (host.renderer && host.stage) host.renderer.render(host.stage.scene, host.stage.camera);
+    },
+
+    beginBenchmark() {
+      if (host.benchmarking || host.switching || !host.hasGpu() || !host.lastFrame) {
+        throw new Error('GPU renderer is not ready for benchmarking');
+      }
+      const renderer = host.renderer;
+      const stage = host.stage;
+      const backend = host.backend;
+      const queue = renderer.backend?.device?.queue;
+      const gl = backend === 'WebGL2' ? renderer.backend?.gl : null;
+      if (backend === 'WebGPU' && typeof queue?.onSubmittedWorkDone !== 'function') {
+        throw new Error('WebGPU completion synchronization unavailable');
+      }
+      if (backend !== 'WebGPU' && (backend !== 'WebGL2' || typeof gl?.finish !== 'function')) {
+        throw new Error('GPU completion synchronization unavailable');
+      }
+      host.benchmarking = true;
+      return {
+        configuration: {
+          backend, width: canvas.width, height: canvas.height,
+          quality: stage.quality, msaa: host.msaa,
+          scale: host.lastFrame.renderScale, dpr: window.devicePixelRatio || 1,
+          view: host.lastFrame.state.diag,
+        },
+        renderBatch(frames) {
+          // Reuse the last normal frame's uniforms and buffer unchanged.
+          for (let index = 0; index < frames; index++) renderer.render(stage.scene, stage.camera);
+        },
+        async synchronize() {
+          if (gl) {
+            if (gl.isContextLost()) throw new Error('WebGL2 context lost');
+            gl.finish();
+            if (gl.isContextLost()) throw new Error('WebGL2 context lost');
+          } else {
+            let timer;
+            try {
+              await Promise.race([
+                queue.onSubmittedWorkDone(),
+                new Promise((_, reject) => {
+                  timer = setTimeout(() => reject(new Error('GPU completion timed out')), 5000);
+                }),
+              ]);
+            } finally { clearTimeout(timer); }
+          }
+        },
+        end() { host.benchmarking = false; },
+      };
     },
 
     rebuildQuality(quality) {

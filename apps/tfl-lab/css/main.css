@@ -194,6 +194,11 @@ option { background: var(--bg-solid); }
 .fps-history polyline { fill: none; stroke: var(--acc); stroke-width: 1.3; vector-effect: non-scaling-stroke; }
 .fps-history circle { fill: var(--acc); }
 .fps-history-stats { font-size: 9px; color: var(--dim); margin-bottom: 5px; }
+.benchmark { border-block: 1px solid var(--line); padding: 6px 0; margin: 6px 0; }
+.benchmark-title { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; }
+.benchmark-readout { font-size: 10px; }
+.benchmark-comparison { font-size: 9px; color: var(--acc); margin-top: 5px; }
+.benchmark .btn:disabled, .backend-control select:disabled { opacity: 0.45; cursor: default; }
 .shortcut-strip {
   position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 50;
   width: max-content; max-width: calc(100vw - 24px); padding: 6px 10px;
