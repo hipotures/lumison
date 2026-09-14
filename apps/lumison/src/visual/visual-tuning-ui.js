@@ -39,8 +39,6 @@ export function createVisualTuningUI({ root, mapper, getFeatures, isActive }) {
       else { input.value = value; output.value = String(value); }
     }
     document.getElementById('mappingEnabled').checked = mapper.tuning.master.enabled;
-    document.getElementById('sensitivity').value = mapper.tuning.master.sensitivity;
-    document.getElementById('sensitivityValue').value = String(mapper.tuning.master.sensitivity);
   }
   function apply(config) {
     if (!isActive()) { status.value = 'Switch to MIDI File mode to tune visual mapping.'; sync(); return; }
@@ -126,8 +124,6 @@ export function createVisualTuningUI({ root, mapper, getFeatures, isActive }) {
   });
   actions.append(file);
   button(actions, 'Import JSON', () => file.click());
-  const sensitivity = TUNING_SCHEMA.find((item) => item.path === 'master.sensitivity');
-  Object.assign(document.getElementById('sensitivity'), { min: sensitivity.minimum, max: sensitivity.maximum, step: sensitivity.step });
   sync();
   return {
     sync,

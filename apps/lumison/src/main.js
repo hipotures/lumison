@@ -350,12 +350,6 @@ function createMidiUI({ engine, baseline, canvas }) {
     tuningUI.sync();
     dirty = true;
   });
-  element('sensitivity').addEventListener('input', (event) => {
-    const sensitivity = mapper.setSensitivity(Number(event.target.value), features);
-    element('sensitivityValue').textContent = sensitivity.toFixed(2);
-    tuningUI.sync();
-    mappingDirty = false;
-  });
   element('timeline').addEventListener('pointerdown', () => { scrubbing = true; });
   element('timeline').addEventListener('input', (event) => {
     player.seek(Number(event.target.value));
@@ -388,7 +382,6 @@ function createMidiUI({ engine, baseline, canvas }) {
     mapper.setEnabled(!live && element('mappingEnabled').checked);
     if (!live && mapper.enabled) mapper.seek(features);
     element('mappingEnabled').disabled = live;
-    element('sensitivity').disabled = live;
     element('fileMode').hidden = live;
     element('liveMode').hidden = !live;
     element('fileTab').classList.toggle('active', !live);
