@@ -17,9 +17,6 @@ const GROUPS = [
   ['lit', 'Lighting'],
   ['ren', 'Rendering'],
   ['view', 'View & Probe'],
-  ['actions', 'Actions'],
-  ['diag', 'Diagnostics'],
-  ['keys', 'Shortcuts'],
 ];
 
 const GROUP_OF = {};
@@ -29,15 +26,73 @@ export function buildUI(root, state, labState, A) {
   root.innerHTML = '';
   const head = el('div', 'panel-head');
   head.append(el('div', 'panel-title', 'Thin-Film Lab'));
-  const pauseBtn = iconBtn('⏸', 'Pause / resume (Space)', () => A.togglePause());
-  pauseBtn.id = 'btnPause';
-  head.append(pauseBtn);
   head.append(iconBtn('⛶', 'Fullscreen (F)', () => A.fullscreen()));
   head.append(iconBtn('–', 'Collapse panel', () => {
-    body.style.display = body.style.display === 'none' ? '' : 'none';
+    root.classList.toggle('collapsed');
   }));
   head.append(iconBtn('✕', 'Hide interface (H)', () => A.hidePanel()));
   root.append(head);
+
+  const fixed = el('div', 'panel-fixed');
+  const actions = el('div', 'action-strip');
+  let pauseBtn;
+  for (const [label, callback] of [
+    ['Pause', () => A.togglePause()],
+    ['Mutate', () => A.mutate()],
+    ['Random', () => A.randomize()],
+    ['Reset', () => A.resetAll()],
+    ['Capture', () => A.capture()],
+  ]) {
+    const button = el('button', 'btn', label);
+    button.addEventListener('click', callback);
+    actions.append(button);
+    if (label === 'Pause') {
+      pauseBtn = button;
+      pauseBtn.id = 'btnPause';
+      pauseBtn.title = 'Pause / resume (Space)';
+    }
+  }
+  fixed.append(actions);
+  const utilities = el('div', 'panel-utilities');
+  const diag = el('aside', 'diagnostics-hud', 'starting…');
+  diag.id = 'diag';
+  diag.hidden = true;
+  diag.setAttribute('aria-label', 'Diagnostics');
+  utilities.append(toggleRow('Diagnostics', false, (enabled) => {
+    diag.hidden = !enabled;
+  }));
+  const more = el('details', 'overflow-menu');
+  more.append(el('summary', 'btn small', 'More'));
+  const menu = el('div', 'overflow-actions');
+  for (const [label, callback] of [
+    ['Export', () => A.exportSettings()],
+    ['Import', () => A.importSettings()],
+    ['Factory Reset', () => A.factoryReset()],
+  ]) {
+    const button = el('button', 'btn', label);
+    button.addEventListener('click', () => {
+      more.open = false;
+      callback();
+    });
+    menu.append(button);
+  }
+  more.append(menu);
+  more.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && more.open) {
+      more.open = false;
+      more.querySelector('summary').focus();
+      event.stopPropagation();
+    }
+  });
+  root.addEventListener('focusout', (event) => {
+    if (!more.contains(event.relatedTarget)) more.open = false;
+  });
+  root.addEventListener('click', (event) => {
+    if (!more.contains(event.target)) more.open = false;
+  });
+  utilities.append(more);
+  fixed.append(utilities);
+  root.append(fixed);
 
   const body = el('div', 'panel-body');
   body.id = 'panelBody';
@@ -47,17 +102,29 @@ export function buildUI(root, state, labState, A) {
   const sections = {};
 
   for (const [gid, title] of GROUPS) {
-    const det = document.createElement('details');
+    const det = document.createElement('section');
     det.className = 'section';
-    det.open = labState.panelCollapsed[gid] !== true || gid === 'preset';
-    det.addEventListener('toggle', () => {
-      labState.panelCollapsed[gid] = !det.open;
-      A.persistSoon();
-    });
-    const sum = document.createElement('summary');
+    const sum = el('button', 'section-heading');
     sum.textContent = title;
+    sum.id = `heading-${gid}`;
+    sum.setAttribute('aria-controls', `section-${gid}`);
+    sum.setAttribute('aria-expanded', String(gid === 'preset'));
+    det.classList.toggle('expanded', gid === 'preset');
     det.append(sum);
     const wrap = el('div', 'sec-body');
+    wrap.id = `section-${gid}`;
+    wrap.hidden = gid !== 'preset';
+    wrap.setAttribute('role', 'region');
+    wrap.setAttribute('aria-labelledby', sum.id);
+    sum.addEventListener('click', () => {
+      const opening = wrap.hidden;
+      for (const section of body.children) {
+        const expanded = section === det && opening;
+        section.classList.toggle('expanded', expanded);
+        section.firstElementChild.setAttribute('aria-expanded', String(expanded));
+        section.lastElementChild.hidden = !expanded;
+      }
+    });
     det.append(wrap);
     body.append(det);
     sections[gid] = wrap;
@@ -73,13 +140,6 @@ export function buildUI(root, state, labState, A) {
     presetBtns[name] = b;
   }
   sections.preset.append(grid);
-  const row1 = el('div', 'btn-row');
-  const mutateBtn = el('button', 'btn', 'Mutate (M)');
-  mutateBtn.addEventListener('click', () => A.mutate());
-  const randBtn = el('button', 'btn', 'Randomize (R)');
-  randBtn.addEventListener('click', () => A.randomize());
-  row1.append(mutateBtn, randBtn);
-  sections.preset.append(row1);
   sections.preset.append(hint('Presets reshape fluid, optics and lighting together. Parameter locks are respected by presets, Mutate, Randomize, Reset and Import.'));
 
   // ---- sliders ----
@@ -287,35 +347,17 @@ export function buildUI(root, state, labState, A) {
   vsec.append(toggleRow('Surface probe', labState.probe, (v) => A.probe(v)));
   vsec.append(hint('Probe: hover the film for a live local thickness / normal readout. Click or drag the film to disturb the surface.'));
 
-  // ---- actions ----
-  const row2 = el('div', 'btn-row');
-  const capBtn = el('button', 'btn', 'Capture Frame');
-  capBtn.addEventListener('click', () => A.capture());
-  const expBtn = el('button', 'btn', 'Export');
-  expBtn.addEventListener('click', () => A.exportSettings());
-  const impBtn = el('button', 'btn', 'Import');
-  impBtn.addEventListener('click', () => A.importSettings());
-  row2.append(capBtn, expBtn, impBtn);
-  sections.actions.append(row2);
-  const row3 = el('div', 'btn-row');
-  const resBtn = el('button', 'btn small', 'Reset');
-  resBtn.addEventListener('click', () => A.resetAll());
-  const factBtn = el('button', 'btn small', 'Factory Reset');
-  factBtn.addEventListener('click', () => A.factoryReset());
-  row3.append(resBtn, factBtn);
-  sections.actions.append(row3);
-
-  // ---- diagnostics ----
-  const diag = el('div', '', '');
-  diag.id = 'diag';
-  diag.textContent = 'starting…';
-  sections.diag.append(diag);
-
   // ---- shortcuts ----
-  sections.keys.append(hint(
+  const shortcuts = el('aside', 'shortcut-strip');
+  shortcuts.id = 'shortcuts';
+  shortcuts.setAttribute('aria-label', 'Keyboard shortcuts');
+  shortcuts.append(hint(
     '<kbd>Space</kbd> pause · <kbd>M</kbd> mutate · <kbd>R</kbd> randomize · ' +
     '<kbd>F</kbd> fullscreen · <kbd>H</kbd> hide UI · <kbd>D</kbd> diagnostic view',
   ));
+  document.getElementById('diag')?.remove();
+  document.getElementById('shortcuts')?.remove();
+  root.after(diag, shortcuts);
 
   function qualitySelect() {
     const s = document.createElement('select');
@@ -451,13 +493,12 @@ export function buildUI(root, state, labState, A) {
     if (normalMode) normalMode.value = normalEvaluation.mode;
     const pr = root.querySelector('input[aria-label="Surface probe"]');
     if (pr) pr.checked = labState.probe;
-    pauseBtn.textContent = state.paused ? '▶' : '⏸';
+    pauseBtn.textContent = state.paused ? 'Resume' : 'Pause';
     pauseBtn.setAttribute('aria-pressed', String(state.paused));
   }
 
   function setDiag(html) {
-    const d = root.querySelector('#diag');
-    if (d) d.innerHTML = html;
+    diag.innerHTML = html;
   }
 
   sync();
