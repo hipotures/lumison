@@ -107,21 +107,26 @@ test('file player rebuilds state on seek and clears it on stop and loop', () => 
   player.load(new ArrayBuffer(0), 'fixture.mid');
 
   player.seek(0.5);
-  assert.equal(player.performance.polyphony, 1);
+  assert.equal(player.performance.heldPolyphony, 1);
+  assert.equal(player.performance.soundingPolyphony, 1);
   assert.equal(player.performance.sustain.on, true);
   player.seek(0.9);
-  assert.equal(player.performance.polyphony, 0);
+  assert.equal(player.performance.heldPolyphony, 0);
+  assert.equal(player.performance.soundingPolyphony, 1);
   player.seek(0.15);
-  assert.equal(player.performance.polyphony, 1);
+  assert.equal(player.performance.heldPolyphony, 1);
+  assert.equal(player.performance.soundingPolyphony, 1);
   assert.equal(player.performance.sustain.on, false);
 
   player.stop();
-  assert.equal(player.performance.polyphony, 0);
+  assert.equal(player.performance.heldPolyphony, 0);
+  assert.equal(player.performance.soundingPolyphony, 0);
   assert.equal(player.performance.sustain.on, false);
   source.setLoop(true);
   player.play();
   time = 1.05;
   player.update();
-  assert.equal(player.performance.polyphony, 0);
+  assert.equal(player.performance.heldPolyphony, 0);
+  assert.equal(player.performance.soundingPolyphony, 0);
   assert.equal(player.performance.sustain.on, false);
 });

@@ -56,13 +56,15 @@ function createMidiUI() {
 
     element('tempo').textContent = `${Number.isInteger(state.currentTempo)
       ? state.currentTempo : state.currentTempo.toFixed(1)} BPM`;
-    element('lastNote').textContent = state.lastNote === null
-      ? '—' : `${noteName(state.lastNote)} / ${state.lastNote}`;
-    element('velocity').textContent = state.lastNote === null ? '—' : state.lastVelocity.toFixed(2);
-    element('activeNotes').textContent = String(state.polyphony);
-    element('noteRange').textContent = state.lowestActiveNote === null
+    element('lastAttack').textContent = state.lastAttackNote === null
+      ? '—' : `${noteName(state.lastAttackNote)} / ${state.lastAttackNote}`;
+    element('velocity').textContent = state.lastAttackNote === null
+      ? '—' : state.lastAttackVelocity.toFixed(2);
+    element('keysHeld').textContent = String(state.heldPolyphony);
+    element('soundingNotes').textContent = String(state.soundingPolyphony);
+    element('noteRange').textContent = state.lowestSoundingNote === null
       ? '—'
-      : `${noteName(state.lowestActiveNote)}–${noteName(state.highestActiveNote)}`;
+      : `${noteName(state.lowestSoundingNote)}–${noteName(state.highestSoundingNote)}`;
     element('sustain').textContent = pedalText(state.sustain);
     element('soft').textContent = pedalText(state.soft);
     element('sostenuto').textContent = pedalText(state.sostenuto);
