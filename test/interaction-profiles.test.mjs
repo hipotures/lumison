@@ -21,6 +21,7 @@ function visualState(engine) {
     adaptive: engine.state.adaptive,
     targetFps: engine.state.targetFps,
     locks: structuredClone(engine.state.locks),
+    normalEvaluation: engine.getNormalEvaluationConfiguration(),
   };
 }
 
@@ -32,6 +33,7 @@ test('profiles change interaction configuration only', () => {
   engine.setParameterLock('exposure', true);
   engine.setQuality('Ultra');
   engine.setMsaa(4);
+  engine.setNormalEvaluation({ mode: 'Displaced Geometry' });
   const before = visualState(engine);
 
   for (const name of ['Qwen-like', 'Mobile-like', 'Fixed baseline']) {

@@ -41,6 +41,12 @@ import {
   snapshotMembraneResponseRuntime,
   validateMembraneWaveEvent,
 } from './membrane-response.js';
+import {
+  configureNormalEvaluation,
+  createNormalEvaluationState,
+  normalEvaluationConfiguration,
+  normalEvaluationRenderState,
+} from './normal-evaluation.js';
 import { adaptiveTick, createAdaptive, createPerf, perfTick } from './perf.js';
 import { applyPreset, mutate, randomize, resetParameters } from './presets.js';
 import { sampleSurface } from './probe.js';
@@ -103,6 +109,7 @@ export class TflEngine {
     this.coordinateShear = createCoordinateShearState();
     this.rippleDisplacement = createRippleDisplacementState();
     this.membraneResponse = createMembraneResponseState();
+    this.normalEvaluation = createNormalEvaluationState();
     this.events = createTransientStore(eventCapacity);
     this.viewport = { aspect: 1 };
     this.lastProbeTime = -Infinity;
@@ -201,6 +208,7 @@ export class TflEngine {
     this.coordinateShear = createCoordinateShearState();
     this.rippleDisplacement = createRippleDisplacementState();
     this.membraneResponse = createMembraneResponseState();
+    this.normalEvaluation = createNormalEvaluationState();
     this.events = createTransientStore(this.events.capacity);
     this.#rebuildQuality();
     return report;
@@ -312,6 +320,14 @@ export class TflEngine {
     return membraneResponseConfiguration(this.membraneResponse);
   }
 
+  setNormalEvaluation(changes) {
+    return configureNormalEvaluation(this.normalEvaluation, changes);
+  }
+
+  getNormalEvaluationConfiguration() {
+    return normalEvaluationConfiguration(this.normalEvaluation);
+  }
+
   emitTransientEvent(event) {
     if (event?.type === RIPPLE_DISPLACEMENT_EVENT_TYPE) {
       const validation = validateRippleDisplacementEvent(event);
@@ -392,6 +408,10 @@ export class TflEngine {
         this.membraneResponse,
         this.events,
       ),
+      normalEvaluation: normalEvaluationRenderState(
+        this.normalEvaluation,
+        this.effectiveQuality,
+      ),
       renderScale: this.state.effective.renderScale,
     });
     if (result?.aspect) this.viewport.aspect = normalizeAspect(result.aspect);
@@ -411,6 +431,9 @@ export class TflEngine {
       coordinateShear: coordinateShearConfiguration(this.coordinateShear),
       rippleDisplacement: rippleDisplacementConfiguration(this.rippleDisplacement),
       membraneResponse: membraneResponseConfiguration(this.membraneResponse),
+    };
+    saved.rendering = {
+      normalEvaluation: normalEvaluationConfiguration(this.normalEvaluation),
     };
     if (includeRuntime) {
       saved.runtime.influence = cloneInfluence(this.influence);
@@ -434,6 +457,9 @@ export class TflEngine {
     let restoredCoordinateShear = null;
     let restoredRippleDisplacement = null;
     let restoredMembraneResponse = null;
+    // Phase 1–3E snapshots predate this setting and semantically represent the
+    // Legacy Fixed normal path, so absence migrates to the explicit default.
+    let restoredNormalEvaluation = createNormalEvaluationState();
     const savedMotionWarp = saved?.interactions?.motionWarp;
     if (savedMotionWarp !== undefined) {
       restoredMotionWarp = createMotionWarpState();
@@ -485,6 +511,16 @@ export class TflEngine {
       if (!membraneReport.ok
         || membraneReport.accepted.length !== Object.keys(MEMBRANE_RESPONSE_DEFAULTS).length) {
         return { ok: false, reason: 'invalid-membrane-response-configuration' };
+      }
+    }
+    const savedNormalEvaluation = saved?.rendering?.normalEvaluation;
+    if (savedNormalEvaluation !== undefined) {
+      const normalReport = configureNormalEvaluation(
+        restoredNormalEvaluation,
+        savedNormalEvaluation,
+      );
+      if (!normalReport.ok || normalReport.accepted.length !== 1) {
+        return { ok: false, reason: 'invalid-normal-evaluation-configuration' };
       }
     }
     if (options.restoreRuntime) {
@@ -563,6 +599,7 @@ export class TflEngine {
     if (restoredCoordinateShear) this.coordinateShear = restoredCoordinateShear;
     if (restoredRippleDisplacement) this.rippleDisplacement = restoredRippleDisplacement;
     if (restoredMembraneResponse) this.membraneResponse = restoredMembraneResponse;
+    if (restoredNormalEvaluation) this.normalEvaluation = restoredNormalEvaluation;
     this.#rebuildQuality();
     return result;
   }
@@ -628,6 +665,10 @@ export class TflEngine {
       membraneResponse: membraneResponseRenderState(
         this.membraneResponse,
         this.events,
+      ),
+      normalEvaluation: normalEvaluationRenderState(
+        this.normalEvaluation,
+        this.effectiveQuality,
       ),
       transientEventCount: activeTransientCount(this.events),
       transientCapacity: this.events.capacity,

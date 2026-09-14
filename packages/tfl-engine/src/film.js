@@ -31,6 +31,7 @@ import {
   MEMBRANE_WAVE_CAPACITY,
   MEMBRANE_WAVE_DEFAULTS,
 } from './membrane-response.js';
+import { DISPLACED_NORMAL_GRADIENT_LIMIT } from './normal-evaluation.js';
 
 export const QUALITY_SPEC = {
   Low:    { oct: 3, spec: 5,  central: false, micro: 0, fineOct: 0 },
@@ -181,6 +182,9 @@ export function createFilmMaterial(qualityName) {
       )),
     ),
     uMembraneWaveEnabled: uniform(0),
+    // 0 = behavior-compatible legacy Fixed sampling/tilt policy,
+    // 1 = recompute spatial displacement for every normal height tap.
+    uNormalMode: uniform(0),
     uMode: uniform(0),
     uFlowSpeed: uniform(1), uFlowScale: uniform(1.3),
     uTurb: uniform(1), uWarp: uniform(1.1), uVort: uniform(1),
@@ -254,26 +258,21 @@ export function createFilmMaterial(qualityName) {
     return { field: mixed, cells, ridge, base, large };
   }
 
-  const graph = Fn(() => {
-    const fullUv = uv();
-    const fixedSt = vec2(fullUv.x.mul(U.uAspect), fullUv.y)
-      .sub(vec2(U.uAspect.mul(0.5), 0.5)).mul(2.0);
-    // Qwen-inspired passive motion warp, translated to canonical surface
-    // units. It displaces the domain before Fixed flow, vortices, nested warp
-    // and thickness structure, so landmarks move coherently. No thickness,
-    // normal, lighting or optical response is added here.
-    const motionDelta = fixedSt.mul(0.5).sub(U.uMotionWarp.xy);
+  // Apply every Phase 3 spatial mechanism at an arbitrary Fixed structural
+  // coordinate. The center sample and Displaced Geometry normal taps call this
+  // same function. Coordinates enter in Fixed's doubled, aspect-correct extent;
+  // influence positions, radii and stored offsets remain canonical surface
+  // units, hence the explicit 0.5/2 compatibility factors.
+  function displacedStructuralCoordinate(fixedCoordinate) {
+    const canonicalCoordinate = fixedCoordinate.mul(0.5);
+
+    const motionDelta = canonicalCoordinate.sub(U.uMotionWarp.xy);
     const motionRadius2 = max(U.uMotionWarp.z.mul(U.uMotionWarp.z), 0.0009);
     const motionEnvelope = exp(motionDelta.dot(motionDelta).div(motionRadius2).negate())
       .mul(U.uMotionWarp.w);
-    const st = fixedSt.add(U.uMotionWarpVector.mul(motionEnvelope.mul(2.0)));
+    const motionOffset = U.uMotionWarpVector.mul(motionEnvelope.mul(2.0));
 
-    // Active deformation is also applied before Fixed flow, vortices, nested
-    // warp and film structure. Positive radial displacement samples inward.
-    // The stored drag vector follows influence velocity, so sampling subtracts
-    // it and visible structural landmarks follow the drag direction. Neither
-    // component adds film thickness, light or color.
-    const activeDelta = fixedSt.mul(0.5).sub(U.uActiveDeformation.xy);
+    const activeDelta = canonicalCoordinate.sub(U.uActiveDeformation.xy);
     const activeDistance = sqrt(activeDelta.dot(activeDelta));
     const activeDirection = activeDelta.div(max(activeDistance, 0.0001));
     const activeRadius2 = max(
@@ -286,12 +285,8 @@ export function createFilmMaterial(qualityName) {
     const activeOffset = U.uActiveDragVector.negate()
       .sub(activeDirection.mul(U.uActiveDeformation.w))
       .mul(activeEnvelope.mul(2.0));
-    // Real coordinate shear: local Y drives X displacement and local X drives
-    // Y displacement. This is an off-diagonal transform, distinct from Active
-    // Drag's uniform local translation and Fixed's late scalar thickness term.
-    // Normalized cross-axis coordinates and a Gaussian envelope keep the
-    // transform bounded at the center, radius edge and fast input speeds.
-    const shearDelta = fixedSt.mul(0.5).sub(U.uCoordinateShear.xy);
+
+    const shearDelta = canonicalCoordinate.sub(U.uCoordinateShear.xy);
     const shearRadius = max(U.uCoordinateShear.z, 0.03);
     const shearEnvelope = exp(
       shearDelta.dot(shearDelta).div(shearRadius.mul(shearRadius)).negate(),
@@ -304,18 +299,14 @@ export function createFilmMaterial(qualityName) {
       U.uCoordinateShearVector.x.mul(shearCross.x),
       U.uCoordinateShearVector.y.mul(shearCross.y),
     ).negate().mul(shearEnvelope.mul(2.0));
-    // Timed ripple displacement uses each event's immutable canonical origin
-    // and explicit age. A localized oscillating front moves sample coordinates
-    // radially before every structural stage; it adds no thickness or glow.
+
     const rippleOffset = vec2(0.0, 0.0).toVar();
-    // A uniform branch prevents the 16-event wave math from affecting the
-    // accepted baseline render cost while the optional mechanism is off.
     If(U.uRippleEnabled.greaterThan(0.0), () => {
       for (let index = 0; index < RIPPLE_DISPLACEMENT_CAPACITY; index++) {
         const event = U.uRippleEvents[index];
         const parameters = U.uRippleParameters[index];
         If(event.w.greaterThan(0.0), () => {
-          const rippleDelta = fixedSt.mul(0.5).sub(event.xy);
+          const rippleDelta = canonicalCoordinate.sub(event.xy);
           const rippleDistance = sqrt(rippleDelta.dot(rippleDelta));
           const rippleDirection = rippleDelta.div(max(rippleDistance, 0.0001));
           const waveRadius = event.z.mul(parameters.y);
@@ -338,11 +329,8 @@ export function createFilmMaterial(qualityName) {
         .div(max(rippleMagnitude, 0.0001)),
     );
     const boundedRippleOffset = rippleOffset.mul(rippleBound).mul(2.0);
-    // Mobile-inspired analytic membrane response. A broad Gaussian footprint
-    // combines signed radial displacement with a perpendicular/tangential
-    // component. It is evaluated before every Fixed structural stage and has
-    // no persistent field, thickness, normal, light or color term.
-    const membraneDelta = fixedSt.mul(0.5).sub(U.uMembraneResponse.xy);
+
+    const membraneDelta = canonicalCoordinate.sub(U.uMembraneResponse.xy);
     const membraneDistance = sqrt(membraneDelta.dot(membraneDelta));
     const membraneDirection = membraneDelta.div(max(membraneDistance, 0.0001));
     const membraneTangent = vec2(membraneDirection.y.negate(), membraneDirection.x);
@@ -357,15 +345,13 @@ export function createFilmMaterial(qualityName) {
       .add(membraneTangent.mul(U.uMembraneVector.y))
       .mul(membraneEnvelope);
 
-    // The wider membrane wave has its own event identity and envelope. It can
-    // be compared with Qwen ripple displacement or combined deliberately.
     const membraneWaveOffset = vec2(0.0, 0.0).toVar();
     If(U.uMembraneWaveEnabled.greaterThan(0.0), () => {
       for (let index = 0; index < MEMBRANE_WAVE_CAPACITY; index++) {
         const event = U.uMembraneWaveEvents[index];
         const parameters = U.uMembraneWaveParameters[index];
         If(event.w.greaterThan(0.0), () => {
-          const waveDelta = fixedSt.mul(0.5).sub(event.xy);
+          const waveDelta = canonicalCoordinate.sub(event.xy);
           const waveDistance = sqrt(waveDelta.dot(waveDelta));
           const waveDirection = waveDelta.div(max(waveDistance, 0.0001));
           const waveFront = event.z.mul(parameters.y);
@@ -397,8 +383,67 @@ export function createFilmMaterial(qualityName) {
         .div(max(membraneMagnitude, 0.0001)),
     );
     const boundedMembraneOffset = membraneOffset.mul(membraneBound).mul(2.0);
-    const structuralSt = st.add(activeOffset).add(shearOffset)
+
+    return fixedCoordinate.add(motionOffset).add(activeOffset).add(shearOffset)
       .add(boundedRippleOffset).add(boundedMembraneOffset);
+  }
+
+  // Height used only by Displaced Geometry normal taps. It intentionally keeps
+  // Fixed's calmer tap field (no capillary fine term and softened creases), but
+  // applies all spatial mechanisms, the late legacy coordinate push, drainage,
+  // pooling, dent, scalar ripple and scalar thickness shear at the tap's own
+  // location. Those scalar terms are included because they change surface
+  // height; lighting/emission/color terms are not part of this function.
+  function displacedNormalHeightAt(fixedCoordinate, knownStructuralCoordinate = null) {
+    const structuralCoordinate = knownStructuralCoordinate
+      ?? displacedStructuralCoordinate(fixedCoordinate);
+    const pack = advected(structuralCoordinate);
+    const pointerCanonical = vec2(
+      U.uPointer.x.sub(0.5).mul(U.uAspect),
+      U.uPointer.y.sub(0.5),
+    );
+    const pointerDelta = fixedCoordinate.mul(0.5).sub(pointerCanonical);
+    const pointerDistance2 = pointerDelta.dot(pointerDelta);
+    const pointerVelocity = vec2(U.uPointerVel.x.mul(U.uAspect), U.uPointerVel.y);
+    const push = exp(pointerDistance2.div(-0.035)).mul(U.uPointer.z);
+    const pushedPack = {
+      adv: pack.adv.add(pointerVelocity.mul(push.mul(1.05))),
+      warp: pack.warp,
+      drift: pack.drift,
+    };
+    const thickness = thicknessAt(pushedPack, false, true);
+    const drainage = U.uDrain.mul(fixedCoordinate.y.mul(0.5)).mul(-0.5);
+    const pooling = U.uDrain.mul(thickness.cells.sub(0.62)).mul(0.38);
+    const radialDistance = sqrt(pointerDistance2.add(1e-5));
+    const dent = exp(pointerDistance2.div(-0.026)).mul(U.uPointer.z);
+    const scalarRipple = sin(radialDistance.mul(42.0).sub(U.uTime.mul(7.0)))
+      .mul(exp(radialDistance.mul(-6.0))).mul(U.uPointer.z.mul(0.18));
+    const thicknessShear = pointerDelta.dot(pointerVelocity)
+      .mul(exp(pointerDistance2.div(-0.045))).mul(U.uPointer.z.mul(-0.20));
+    const heightField = thickness.field.add(drainage).add(pooling)
+      .add(dent.mul(0.82)).add(scalarRipple).add(thicknessShear);
+    return max(toNm(heightField), 34.0);
+  }
+
+  const graph = Fn(() => {
+    const fullUv = uv();
+    const fixedSt = vec2(fullUv.x.mul(U.uAspect), fullUv.y)
+      .sub(vec2(U.uAspect.mul(0.5), 0.5)).mul(2.0);
+    // Phase 3 optional mechanisms alter the center structural coordinate at a
+    // single explicit boundary. Legacy Fixed normals continue to offset this
+    // already-displaced center; the optional mode calls the same boundary for
+    // every neighboring height tap.
+    const structuralSt = displacedStructuralCoordinate(fixedSt);
+    // Fixed used the passive-only coordinate for vignette placement. Preserve
+    // that separate artistic path in both normal modes.
+    const vignetteMotionDelta = fixedSt.mul(0.5).sub(U.uMotionWarp.xy);
+    const vignetteMotionRadius2 = max(U.uMotionWarp.z.mul(U.uMotionWarp.z), 0.0009);
+    const vignetteMotionEnvelope = exp(
+      vignetteMotionDelta.dot(vignetteMotionDelta).div(vignetteMotionRadius2).negate(),
+    ).mul(U.uMotionWarp.w);
+    const vignetteSt = fixedSt.add(
+      U.uMotionWarpVector.mul(vignetteMotionEnvelope.mul(2.0)),
+    );
 
     const pack0 = advected(structuralSt);
     // Pointer push: velocity advects coordinates near the cursor.
@@ -431,46 +476,95 @@ export function createFilmMaterial(qualityName) {
     const ex = vec2(eps, float(0.0));
     const ey = vec2(float(0.0), eps);
     const gradScale = float(1.3).mul(float(1.25).sub(clamp(U.uTension.mul(0.4), 0.0, 0.6)));
-    let gx, gy;
-    if (Q.central) {
-      const hx1 = toNm(thicknessAt({
-        adv: advected(structuralSt.add(ex)).adv, warp: pack0.warp, drift: pack0.drift,
-      }, false, true).field);
-      const hx0 = toNm(thicknessAt({
-        adv: advected(structuralSt.sub(ex)).adv, warp: pack0.warp, drift: pack0.drift,
-      }, false, true).field);
-      const hy1 = toNm(thicknessAt({
-        adv: advected(structuralSt.add(ey)).adv, warp: pack0.warp, drift: pack0.drift,
-      }, false, true).field);
-      const hy0 = toNm(thicknessAt({
-        adv: advected(structuralSt.sub(ey)).adv, warp: pack0.warp, drift: pack0.drift,
-      }, false, true).field);
-      gx = hx1.sub(hx0).div(eps.mul(2.0).mul(NM_GAIN));
-      gy = hy1.sub(hy0).div(eps.mul(2.0).mul(NM_GAIN));
-    } else {
-      const hx1 = toNm(thicknessAt({
-        adv: advected(structuralSt.add(ex)).adv, warp: pack0.warp, drift: pack0.drift,
-      }, false, true).field);
-      const hy1 = toNm(thicknessAt({
-        adv: advected(structuralSt.add(ey)).adv, warp: pack0.warp, drift: pack0.drift,
-      }, false, true).field);
-      gx = hx1.sub(h).div(eps.mul(NM_GAIN));
-      gy = hy1.sub(h).div(eps.mul(NM_GAIN));
-    }
-    let N = normalize(vec3(gx.mul(gradScale.negate()), gy.mul(gradScale.negate()), float(1.0)));
+    const gx = float(0.0).toVar();
+    const gy = float(0.0).toVar();
+    // Only one tap policy executes per fragment. The optional path re-evaluates
+    // the complete spatial transform and semantic height field independently
+    // at every tap. Low quality retains forward differences, but compares
+    // against a matching calm center height.
+    If(U.uNormalMode.equal(1), () => {
+      let displacedGx;
+      let displacedGy;
+      if (Q.central) {
+        const hx1 = displacedNormalHeightAt(fixedSt.add(ex));
+        const hx0 = displacedNormalHeightAt(fixedSt.sub(ex));
+        const hy1 = displacedNormalHeightAt(fixedSt.add(ey));
+        const hy0 = displacedNormalHeightAt(fixedSt.sub(ey));
+        displacedGx = hx1.sub(hx0).div(eps.mul(2.0).mul(NM_GAIN));
+        displacedGy = hy1.sub(hy0).div(eps.mul(2.0).mul(NM_GAIN));
+      } else {
+        const centerHeight = displacedNormalHeightAt(fixedSt, structuralSt);
+        const hx1 = displacedNormalHeightAt(fixedSt.add(ex));
+        const hy1 = displacedNormalHeightAt(fixedSt.add(ey));
+        displacedGx = hx1.sub(centerHeight).div(eps.mul(NM_GAIN));
+        displacedGy = hy1.sub(centerHeight).div(eps.mul(NM_GAIN));
+      }
+      gx.assign(clamp(
+        displacedGx,
+        -DISPLACED_NORMAL_GRADIENT_LIMIT,
+        DISPLACED_NORMAL_GRADIENT_LIMIT,
+      ));
+      gy.assign(clamp(
+        displacedGy,
+        -DISPLACED_NORMAL_GRADIENT_LIMIT,
+        DISPLACED_NORMAL_GRADIENT_LIMIT,
+      ));
+    }).Else(() => {
+      let legacyGx;
+      let legacyGy;
+      if (Q.central) {
+        const hx1 = toNm(thicknessAt({
+          adv: advected(structuralSt.add(ex)).adv, warp: pack0.warp, drift: pack0.drift,
+        }, false, true).field);
+        const hx0 = toNm(thicknessAt({
+          adv: advected(structuralSt.sub(ex)).adv, warp: pack0.warp, drift: pack0.drift,
+        }, false, true).field);
+        const hy1 = toNm(thicknessAt({
+          adv: advected(structuralSt.add(ey)).adv, warp: pack0.warp, drift: pack0.drift,
+        }, false, true).field);
+        const hy0 = toNm(thicknessAt({
+          adv: advected(structuralSt.sub(ey)).adv, warp: pack0.warp, drift: pack0.drift,
+        }, false, true).field);
+        legacyGx = hx1.sub(hx0).div(eps.mul(2.0).mul(NM_GAIN));
+        legacyGy = hy1.sub(hy0).div(eps.mul(2.0).mul(NM_GAIN));
+      } else {
+        const hx1 = toNm(thicknessAt({
+          adv: advected(structuralSt.add(ex)).adv, warp: pack0.warp, drift: pack0.drift,
+        }, false, true).field);
+        const hy1 = toNm(thicknessAt({
+          adv: advected(structuralSt.add(ey)).adv, warp: pack0.warp, drift: pack0.drift,
+        }, false, true).field);
+        legacyGx = hx1.sub(h).div(eps.mul(NM_GAIN));
+        legacyGy = hy1.sub(h).div(eps.mul(NM_GAIN));
+      }
+      gx.assign(legacyGx);
+      gy.assign(legacyGy);
+    });
+    const N = normalize(vec3(
+      gx.mul(gradScale.negate()),
+      gy.mul(gradScale.negate()),
+      float(1.0),
+    )).toVar();
     if (Q.micro > 0) {
       const m1 = vnoise(structuralSt.mul(47.0).add(U.uTime.mul(0.35))).sub(0.5);
       const m2 = vnoise(structuralSt.mul(59.0).sub(vec2(U.uTime.mul(0.3), 0.0))).sub(0.5);
-      N = normalize(N.add(vec3(m1, m2, float(0.0)).mul(U.uFine.mul(0.13))));
+      N.assign(normalize(N.add(vec3(m1, m2, float(0.0)).mul(U.uFine.mul(0.13)))));
     }
-    // The pointer must deform the apparent surface, not only change film
-    // thickness/color. Add an aspect-correct radial normal tilt plus a smaller
-    // directional drag tilt. This makes clicks read as real dimples and drags
-    // as pulled membrane rather than as local recoloring.
-    const pointerProfile = exp(pdd.div(-0.030)).mul(U.uPointer.z);
-    const radialTilt = pdMetric.mul(pointerProfile.mul(4.2));
-    const dragTilt = pointerVelMetric.mul(exp(pdd.div(-0.050)).mul(U.uPointer.z.mul(0.42)));
-    N = normalize(N.add(vec3(radialTilt.x.add(dragTilt.x).negate(), radialTilt.y.add(dragTilt.y).negate(), 0.0)));
+    // Historical explicit radial/directional tilt is compensation for Fixed's
+    // inconsistent height taps. Retain it exactly in Legacy mode and omit it
+    // from Displaced Geometry mode to avoid counting deformation twice.
+    If(U.uNormalMode.equal(0), () => {
+      const pointerProfile = exp(pdd.div(-0.030)).mul(U.uPointer.z);
+      const radialTilt = pdMetric.mul(pointerProfile.mul(4.2));
+      const dragTilt = pointerVelMetric.mul(
+        exp(pdd.div(-0.050)).mul(U.uPointer.z.mul(0.42)),
+      );
+      N.assign(normalize(N.add(vec3(
+        radialTilt.x.add(dragTilt.x).negate(),
+        radialTilt.y.add(dragTilt.y).negate(),
+        0.0,
+      ))));
+    });
 
     // --- lighting (independent slow orbit) ---
     const V = vec3(0.0, 0.0, 1.0);
@@ -545,7 +639,7 @@ export function createFilmMaterial(qualityName) {
     const luma = graded.x.mul(0.2126).add(graded.y.mul(0.7152)).add(graded.z.mul(0.0722));
     graded = mix(vec3(luma, luma, luma), graded, U.uSat);
     // vignette (restrained) + grain/dither
-    const vg = st.x.mul(st.x).add(st.y.mul(st.y));
+    const vg = vignetteSt.x.mul(vignetteSt.x).add(vignetteSt.y.mul(vignetteSt.y));
     graded = graded.mul(float(1.0).sub(smoothstep(0.9, 2.4, vg).mul(0.16)));
     const pixel = floor(fullUv.mul(U.uRes));
     const gr = hash21(pixel).sub(0.5).mul(U.uGrain);
@@ -648,6 +742,7 @@ export function updateUniforms(U, s, env) {
       event?.lifetime ?? 1,
     );
   }
+  U.uNormalMode.value = env.normalEvaluation?.shaderMode ?? 0;
   U.uMode.value = env.mode;
   U.uFlowSpeed.value = s.flowSpeed;
   U.uFlowScale.value = s.flowScale;

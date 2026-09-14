@@ -4,6 +4,7 @@
 // so presets / mutate / import / reset refresh every control consistently.
 import {
   PARAM_DEFS, QUALITY_LEVELS, DIAG_MODES, TARGET_FPS_OPTIONS, PRESET_NAMES,
+  NORMAL_EVALUATION_MODE_NAMES,
 } from '../../../packages/tfl-engine/src/index.js';
 import { INTERACTION_PROFILE_NAMES } from './interaction-profiles.js';
 import { formatNum } from './util.js';
@@ -122,6 +123,7 @@ export function buildUI(root, state, labState, A) {
   const initialCoordinateShear = A.coordinateShearConfiguration();
   const initialRippleDisplacement = A.rippleDisplacementConfiguration();
   const initialMembraneResponse = A.membraneResponseConfiguration();
+  const initialNormalEvaluation = A.normalEvaluationConfiguration();
   const profileSelect = document.createElement('select');
   profileSelect.id = 'selInteractionProfile';
   profileSelect.setAttribute('aria-label', 'Interaction profile');
@@ -269,6 +271,23 @@ export function buildUI(root, state, labState, A) {
 
   // ---- view ----
   const vsec = sections.view;
+  const normalModeSelect = document.createElement('select');
+  normalModeSelect.id = 'selNormalEvaluation';
+  normalModeSelect.setAttribute('aria-label', 'Normal evaluation');
+  for (const mode of NORMAL_EVALUATION_MODE_NAMES) {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = mode;
+    normalModeSelect.append(option);
+  }
+  normalModeSelect.value = initialNormalEvaluation.mode;
+  normalModeSelect.addEventListener('change', () => A.normalEvaluation({
+    mode: normalModeSelect.value,
+  }));
+  vsec.append(kvRow('Normal evaluation', normalModeSelect));
+  vsec.append(hint(
+    'Legacy Fixed preserves its compensation tilt. Displaced Geometry derives lighting normals from the same spatially deformed height field; use the Normal view to compare.',
+  ));
   vsec.append(kvRow('Diagnostic view (D)', diagSelect()));
   vsec.append(toggleRow('Surface probe', labState.probe, (v) => A.probe(v)));
   vsec.append(hint('Probe: hover the film for a live local thickness / normal readout. Click or drag the film to disturb the surface.'));
@@ -434,6 +453,9 @@ export function buildUI(root, state, labState, A) {
     if (membraneWavesDuringDrag) {
       membraneWavesDuringDrag.checked = labState.membraneWaveDuringDrag;
     }
+    const normalEvaluation = A.normalEvaluationConfiguration();
+    const normalMode = root.querySelector('#selNormalEvaluation');
+    if (normalMode) normalMode.value = normalEvaluation.mode;
     const pr = root.querySelector('input[aria-label="Surface probe"]');
     if (pr) pr.checked = labState.probe;
     pauseBtn.textContent = state.paused ? '▶' : '⏸';

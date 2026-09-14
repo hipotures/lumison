@@ -136,6 +136,19 @@ export {
   validateMembraneWaveEvent,
 } from './membrane-response.js';
 export {
+  configureNormalEvaluation,
+  createNormalEvaluationState,
+  DISPLACED_NORMAL_GRADIENT_LIMIT,
+  NORMAL_EVALUATION_DEFAULTS,
+  NORMAL_EVALUATION_MODE_NAMES,
+  NORMAL_EVALUATION_MODES,
+  NORMAL_EVALUATION_SHADER_MODES,
+  normalEvaluationConfiguration,
+  normalEvaluationRenderState,
+  normalSamplingCoordinates,
+  stableNormalFromGradient,
+} from './normal-evaluation.js';
+export {
   DEFAULT_MUTATION_SEED,
   DEFAULT_VISUAL_SEED,
   nextStateRandom,

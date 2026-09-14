@@ -338,6 +338,31 @@ TFL Lab provides a lightweight **Interaction profile** selector. Profiles write 
 
 The selector replaces the earlier ambiguous **Fixed baseline** action button. Choosing a named profile is an explicit configuration action; selecting or editing Custom does not reset the current values. Profile choice and Lab trigger toggles are persisted alongside the engine configuration.
 
+## Normal evaluation modes (Phase 3F)
+
+`setNormalEvaluation({ mode })` selects one of two engine rendering policies. The default is **Legacy Fixed**, so existing Phase 3E output remains the compatibility path until the user deliberately selects **Displaced Geometry**. The setting is independent of scene parameters, optical and lighting controls, locks and TFL Lab interaction profiles. Normal Reset leaves it unchanged; Factory Reset restores Legacy Fixed.
+
+**Legacy Fixed** retains the historical construction exactly at the normal-policy boundary. The center height uses the complete rendered field. Neighbor taps offset the already-displaced center coordinate, recompute only part of the Fixed field path, reuse the center warp/drift channels, omit interaction height terms and finally add Fixed's explicit radial tilt (4.2 coefficient) and directional drag tilt (.42 coefficient). This remains the default because changing these choices changes established lighting and interference incidence.
+
+**Displaced Geometry** evaluates every neighboring height tap from its own base surface coordinate through the same `displacedStructuralCoordinate` function used for the center structure. That function includes:
+
+- Passive Warp;
+- Active Press radial displacement;
+- Active Drag translation;
+- Coordinate Shear;
+- Qwen Ripple Displacement events;
+- continuous broad membrane radial/tangential displacement and Mobile Membrane Wave events.
+
+After the early structural transform, each tap also evaluates Fixed's late velocity coordinate push. The differentiated height includes drainage, cell pooling and the legacy dent, scalar ripple and scalar thickness-shear terms because those terms change the surface height in nanometres. It excludes interference, Fresnel, specular, emission, glow, grading and other color/light quantities. The normal field continues to use Fixed's intentional calmer surface: capillary fine detail is omitted and cellular/ridge weights remain softened. The final micro-normal detail remains common to both modes.
+
+Displaced Geometry does not add the legacy explicit radial/directional normal tilt. The height derivative already contains the local coordinate and height response, so stacking the compensating tilt would double-count deformation. No hybrid mode is exposed in Phase 3F; the two choices provide a direct comparison between historical compensation and geometry-derived lighting.
+
+Normal offsets remain aspect-correct because they operate in Fixed's doubled canonical structural extent. Medium, High and Ultra retain central differences with `epsilon = 0.0045` Fixed units; Low retains forward differences with `epsilon = 0.009`. These are the existing quality constants, equal to .00225 and .0045 canonical surface units respectively. Denominators retain explicit positive minima throughout every radial/event calculation. The optional mode clamps normalized height derivatives to ±64 before constructing a vector with positive Z and normalizing it; this bounds finite pathological gradients without changing Legacy Fixed.
+
+The new mode costs more. Central-difference qualities still use four normal height samples, but each sample now recomputes the spatial transform, including bounded transient-event loops. Low uses two displaced neighbor evaluations plus one matching calm center-height evaluation, increasing its normal-height samples from two to three. The uniform mode branch keeps the additional tap path inactive in Legacy Fixed, although the compiled material graph is larger and backend/compiler effects require real GPU profiling. Phase 3F does not import Aggressive quality changes or modify adaptive-quality policy.
+
+The **Normal** diagnostic view displays the selected final normal, and engine diagnostics report the mode, whether legacy tilt is active, normal-height sample count and displacement-evaluation count. Canvas2D declares Displaced Geometry normals unavailable. Surface Probe remains the approximate Fixed CPU probe and does not validate the GPU mode.
+
 ## Seeds and replay
 
 The state separates a Fixed visual seed, a mutation/randomization seed and transient allocation sequence. The current Fixed shader retains its hard-coded deterministic hashes; the visual seed is recorded but intentionally not wired to the shader because doing so would change the baseline. Mutate and Randomize use a counter-based seeded sequence unless a test or caller supplies an explicit random function. Event allocation owns a separate sequence.
@@ -348,7 +373,7 @@ Given the same initial snapshot, seeds, parameter transactions, influence/event 
 
 Snapshot schema version 2 stores requested/target parameters, locks, scene/render configuration, seeds and mutation sequence. Version 1 Phase 1 snapshots are accepted and migrated. Invalid known parameter values reject the snapshot before changing live state; unknown historical keys are ignored.
 
-Normal configuration snapshots exclude clocks, `current`, `effective`, continuous influence, response runtime and transient events. They include passive configuration under `interactions.motionWarp`, active press/drag configuration under `interactions.activeDeformation`, shear configuration under `interactions.coordinateShear`, ripple configuration under `interactions.rippleDisplacement`, and membrane configuration under `interactions.membraneResponse`. Applying one immediately settles validated parameter values as Fixed import/restore already did, respects live locks when `preserveLocks` is selected, and leaves live pause, clocks, influence and events alone. TFL Lab separately persists its interaction profile and event trigger toggles.
+Normal configuration snapshots exclude clocks, `current`, `effective`, continuous influence, response runtime and transient events. They include passive configuration under `interactions.motionWarp`, active press/drag configuration under `interactions.activeDeformation`, shear configuration under `interactions.coordinateShear`, ripple configuration under `interactions.rippleDisplacement`, membrane configuration under `interactions.membraneResponse`, and the validated normal policy under `rendering.normalEvaluation`. Phase 1–3E snapshots without that field migrate to Legacy Fixed because that was their only normal policy. Applying one immediately settles validated parameter values as Fixed import/restore already did, respects live locks when `preserveLocks` is selected, and leaves live pause, clocks, influence and events alone. TFL Lab separately persists its interaction profile and event trigger toggles.
 
 `createSnapshot({ includeRuntime: true })` explicitly adds current/effective values, clocks, pause, influence, passive, active translation/press, coordinate-shear and continuous membrane responses, transient store, viewport aspect, adaptive scale and effective quality. `restoreSnapshot(..., { restoreRuntime: true })` restores that state for deterministic replay and testing. TFL Lab persistence uses the normal configuration form.
 
@@ -360,6 +385,7 @@ The main `TflEngine` surface now covers:
 - validated controls: `setParameter`, `setParameters`, `applyPreset`, `mutate`, `randomize`, `reset`, `factoryReset`, locks and render settings
 - time: `advance`, `setPaused`, `togglePaused`
 - spatial control: `setViewport`, `setSpatialInfluence`, `clearSpatialInfluence`, `setMotionWarp`, `getMotionWarpConfiguration`, `setActiveDeformation`, `getActiveDeformationConfiguration`, `setCoordinateShear`, `getCoordinateShearConfiguration`, `setRippleDisplacement`, `getRippleDisplacementConfiguration`, `setMembraneResponse`, `getMembraneResponseConfiguration`
+- normal policy: `setNormalEvaluation`, `getNormalEvaluationConfiguration`
 - timed infrastructure: `emitTransientEvent`, `clearTransientEvents`
 - rendering budget: quality, MSAA, adaptive mode, target FPS and `render`
 - inspection: `diagnostics`, `sampleSurface`
@@ -367,10 +393,10 @@ The main `TflEngine` surface now covers:
 
 The controller accepts a rendering-host interface rather than canvases. TFL Lab creates the browser host with its DOM canvases, then supplies that host to the engine. TFL Lab keeps `probe`, panel visibility and panel-collapse preferences in a separate application-state object; they are no longer properties of engine state. The UI reads engine state but sends every numeric change back through engine methods. The engine controller and its state/spatial/clock/event modules contain no PointerEvent, mouse-button, localStorage, keyboard, touch, MIDI or piano concepts.
 
-Diagnostics expose canonical influence values, passive response, active amplitude, press displacement, drag translation vector, coordinate-shear vector, ripple configuration/count, membrane response/wave count, all clocks, requested/current/effective scale, active transient count, lock count and the last transaction counts. `frameMs` remains the smoothed application frame interval; it is not labelled as GPU execution time.
+Diagnostics expose canonical influence values, passive response, active amplitude, press displacement, drag translation vector, coordinate-shear vector, ripple configuration/count, membrane response/wave count, normal mode/sample policy, all clocks, requested/current/effective scale, active transient count, lock count and the last transaction counts. `frameMs` remains the smoothed application frame interval; it is not labelled as GPU execution time.
 
 ## Fixed compatibility seam and deferred Phase 3 work
 
-Phase 2 made no shader formula or constant changes. Phase 3A adds only its gated early coordinate displacement. Phase 3B adds the separately zeroed active offset before the same structural stages. Phase 3C adds a separately zeroed off-diagonal coordinate transform at that boundary. Phase 3D adds a separately zeroed bounded sum of timed ripple offsets. Phase 3E adds separately gated continuous radial/tangential and timed membrane-wave offsets. With Passive Warp, Active Press, Active Drag, Coordinate Shear, Ripple Displacement and Mobile Membrane disabled and `legacyFixedEnabled` enabled, all new offsets are zero and the historical Fixed coordinates and influence uniforms receive their previous values. Browser rendering still maps the influence descriptor to historical Fixed UV and UV/s immediately before upload.
+Phase 2 made no shader formula or constant changes. Phase 3A adds only its gated early coordinate displacement. Phase 3B adds the separately zeroed active offset before the same structural stages. Phase 3C adds a separately zeroed off-diagonal coordinate transform at that boundary. Phase 3D adds a separately zeroed bounded sum of timed ripple offsets. Phase 3E adds separately gated continuous radial/tangential and timed membrane-wave offsets. Phase 3F factors those spatial mechanisms into one sampling boundary and adds an optional derivative path; Legacy Fixed preserves the accepted sampling and explicit-tilt policy. With Passive Warp, Active Press, Active Drag, Coordinate Shear, Ripple Displacement and Mobile Membrane disabled, `legacyFixedEnabled` enabled and Normal Evaluation set to Legacy Fixed, all optional offsets are zero and the historical Fixed coordinates and influence uniforms receive their previous values. Browser rendering still maps the influence descriptor to historical Fixed UV and UV/s immediately before upload.
 
-Later work must decide how a future normal architecture handles deformation Jacobians and whether canonical flow/lighting clocks replace Fixed master-clock multiplication. Qwen ripple thickness/glow and cells, Mobile touch/gesture/device-motion input, Mobile optics and persistent simulation remain absent.
+The new mode finite-differences the displaced height field rather than calculating an analytic deformation Jacobian; a future optimization may derive or cache selected gradients after visual acceptance. Canonical flow/lighting-clock replacement, Qwen ripple thickness/glow and cells, Mobile touch/gesture/device-motion input, Mobile optics and persistent simulation remain absent.

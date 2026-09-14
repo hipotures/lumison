@@ -223,6 +223,7 @@ async function boot() {
       `shear    <b>${diagnostic.coordinateShear.enabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.coordinateShear.gain.toFixed(2)}</b>  speed <b>${diagnostic.coordinateShear.sourceSpeed.toFixed(2)} su/s</b>  vector <b>${diagnostic.coordinateShear.displacement.x.toFixed(4)}, ${diagnostic.coordinateShear.displacement.y.toFixed(4)} su</b>${diagnostic.capabilities?.coordinateShear === false ? '  (GPU unavailable)' : ''}`,
       `ripple   <b>${diagnostic.rippleDisplacement.enabled ? 'on' : 'off'}</b>  gain <b>${diagnostic.rippleDisplacement.gain.toFixed(2)}</b>  active <b>${diagnostic.rippleDisplacement.activeEventCount}/${diagnostic.rippleDisplacement.capacity}</b>${diagnostic.capabilities?.rippleDisplacement === false ? '  (GPU unavailable)' : ''}`,
       `membrane <b>${diagnostic.membraneResponse.enabled ? 'on' : 'off'}</b>  radial/tangent <b>${diagnostic.membraneResponse.radialDisplacement.toFixed(4)} / ${diagnostic.membraneResponse.tangentialDisplacement.toFixed(4)} su</b>  radius <b>${diagnostic.membraneResponse.radius.toFixed(2)}</b>  waves <b>${diagnostic.membraneResponse.activeWaveCount}/${diagnostic.membraneResponse.waveCapacity}</b>${diagnostic.capabilities?.membraneResponse === false ? '  (GPU unavailable)' : ''}`,
+      `normals  <b>${diagnostic.normalEvaluation.mode}</b>  height taps <b>${diagnostic.normalEvaluation.normalHeightSamples}</b>  displacement evals <b>${diagnostic.normalEvaluation.displacementEvaluations}</b>${diagnostic.normalEvaluation.legacyExplicitTilt ? '  · legacy tilt' : ''}${diagnostic.capabilities?.displacedGeometryNormals === false && diagnostic.normalEvaluation.displacedGeometry ? '  (GPU unavailable)' : ''}`,
       `clocks   animation ${diagnostic.clocks.animation.toFixed(2)}  flow ${diagnostic.clocks.flow.toFixed(2)}  light ${diagnostic.clocks.lighting.toFixed(2)}  events ${diagnostic.clocks.events.toFixed(2)}`,
       `events   ${diagnostic.transientEventCount}/${diagnostic.transientCapacity}  locks ${diagnostic.lockCount}  tx ${diagnostic.lastTransaction.accepted}/${diagnostic.lastTransaction.skipped}/${diagnostic.lastTransaction.rejected}`,
       `mode     ${state.diag}${state.paused ? '  ·  PAUSED' : ''}`,
@@ -280,6 +281,14 @@ async function boot() {
       const report = engine.setMembraneResponse(changes);
       if (report.changed) {
         markInteractionProfileCustom(labState);
+        app.ui?.sync(); persistSoon();
+      }
+      return report;
+    },
+    normalEvaluationConfiguration: () => engine.getNormalEvaluationConfiguration(),
+    normalEvaluation: (changes) => {
+      const report = engine.setNormalEvaluation(changes);
+      if (report.changed) {
         app.ui?.sync(); persistSoon();
       }
       return report;
